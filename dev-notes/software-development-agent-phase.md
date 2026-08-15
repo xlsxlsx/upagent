@@ -1,0 +1,239 @@
+# 软件开发 Agent 流水线阶段记录（计划 → 执行 → 审查）
+
+> 对应 `agent/` 包（AI Software Engineering Organization）的一轮增量升级。
+> 上游设计草案见 `new.md`，运行时说明见 `agent/README.md`。
+
+## 为什么存在
+
+`agent/` 包已经有完整的多角色运行时：Supervisor 调度、Planner 拆解、
+Router 分派、Tools 执行、Reflection 修复、Audit 终审。但用户的入口
+只有一句话任务（`Supervisor.run(task)`），有三个明显缺口：
+
+1. Planner 不感知技术栈：用户说「FastAPI + PostgreSQL + React」，
+   计划仍然是靠任务文本关键词猜领域。
+2. 执行没有审查门禁：任务做完直接标记完成，没有「审查不通过→重试」。
+3. 终审（`AuditAgent`）没有被接入流水线，最后一步要靠人手动调。
+
+本阶段把入口改成用户只输入两样东西——**最终目标 + 可能的技术栈**，
+然后 Agent 自动完成「**计划 → 执行 → 审查**」的闭环。
+
+## 新增了什么
+
+### 用户输入模型
+- `agent/core/request.py` — `UserRequest(goal, tech_stack, constraints, output_dir)`
+  只做结构化与校验（goal 必填、长度上限），`render()` 输出给 LLM 的请求摘要。
+
+### 技术栈感知的计划
+- `agent/planner/stack_map.py` — `detect_domains(tech_stack)`：技术栈关键词 →
+  领域（React/Vue→frontend、FastAPI/Django→backend、PostgreSQL/MySQL→database、
+  pytest/Jest→testing、Docker/K8s→devops）。
+- `agent/planner/decomposition.py` — `decompose(task, tech_stack=None)`：
+  任务关键词与技术栈取并集决定实现子域。
+- `agent/planner/execution_planner.py` — `ExecutionPlan` 增加 `tech_stack` 字段，
+  `render()` 输出 `## Tech Stack`；`create_execution_plan(task, tech_stack=None)`。
+- `agent/planner/planner.py` — `Planner.create_plan(task, tech_stack=None)`；
+  注入的旧版单参数 `decompose_fn` 自动兼容（inspect 判断）。
+
+### 执行时注入项目结构
+- `agent/core/loop.py` — `AgentLoop.repo_map_provider`：每次思考前把
+  `Repository Map`（codebase 层生成）注入上下文，解决「LLM 不知道项目结构」。
+
+### 审查门禁与终审验收
+- `agent/communication/event.py` — 新增事件：`PLAN_CREATED`、`REVIEW_PASSED`、
+  `REVIEW_FAILED`、`DELIVERY_ACCEPTED`、`DELIVERY_REJECTED`。
+- `agent/supervisor/supervisor.py` —
+  - `run_request(UserRequest)`：计划（落盘 `execution_plan.md`）→ 执行 → 终审。
+  - `review_fn`：每个任务完成后的审查门禁；不通过计入该任务的重试预算。
+  - `acceptance_fn`：任务树全部完成后的终审验收；不通过 → `accepted=False`。
+  - `last_plan`：最近一次执行计划，供上层取回。
+
+### 一站式入口
+- `agent/runner.py` — `run_project(goal, tech_stack, router, decide_fn, ...)`：
+  用户输入 → 计划 → 执行 → 审查 → 交付结论；默认终审用 `AuditAgent`
+  生成 `final_report.md`（`default_acceptance`）。
+
+### 测试
+- `tests/test_project_pipeline.py` — 16 个用例：输入校验、技术栈检测、
+  计划落档、Repository Map 注入、审查门禁重试、终审拒绝、端到端流水线。
+
+## 与 Pi 设计的对应
+
+```text
+AgentHarness = supervisor + planner + router   （可复用大脑，纯注入函数，无 UI 依赖）
+AgentSession = tools + codebase + memory        （编码环境）
+TUI / CLI    = 未来前端（本阶段未引入）
+```
+
+- 「计划 → 执行 → 审查」就是 Pi agent loop 的三拍：
+  think（Planner）→ act（Tools）→ reflect（review_fn / AuditAgent）。
+- Supervisor 发布事件、其他组件订阅，对应 Pi 的事件流（EventBus 已存在）。
+- LLM 全部通过注入函数接入（`reason_fn` / `decide_fn` / `review_fn` /
+  `acceptance_fn` / `repo_map_provider`），核心仍是纯标准库、可离线测试。
+
+## 如何测试 / 使用
+
+```bash
+uv run pytest tests/test_project_pipeline.py
+```
+
+端到端最小示例（详细版见 `agent/README.md`）：
+
+```python
+outcome = run_project(
+    goal="开发一个类似 Steam 的游戏平台",
+    tech_stack="Python FastAPI + PostgreSQL + React",
+    router=router,              # 注册好各角色 Agent 的 Router
+    decide_fn=Planner().decide,
+    output_dir=Path("project"),
+)
+print(outcome.result.finished, outcome.accepted)   # 是否跑完、是否验收通过
+print(outcome.report_path)
+```
+
+## 后续方向（对齐 roadmap issue #1）
+
+- LLM 版 `decompose_fn` / `assess_fn` / `review_fn`：注入点已留好，规则版只是默认值。
+- 向量代码检索：`CodeSearch.embed_fn` 注入即可替换关键词版。
+- 审查不通过自动回退到问题阶段（`workflow/task_lifecycle.md` 的回退规则，
+  目前由调用方决定是否回退）。
+## 增量：回退规则（自动执行 task_lifecycle 回退）
+
+### 为什么
+
+`workflow/task_lifecycle.md` 早就写好了回退规则，但之前 Supervisor
+失败只会「记 failure 然后停」，不会真正回退重做。本增量把规则变成代码。
+
+### 改了什么
+
+- `agent/planner/task_tree.py` — `TaskTree.rollback_to(origin_type)`：
+  把「问题产生阶段」及其后的节点重置为 PENDING，更早阶段保持完成。
+- `agent/communication/event.py` — 新增 `PHASE_ROLLED_BACK` 事件。
+- `agent/supervisor/supervisor.py` —
+  - `ROLLBACK_TARGETS` 映射：testing→implementation、security→architecture、
+    deploy/各开发子域→implementation；requirement/architecture 无更早阶段可回退。
+  - 任务重试耗尽 → 自动回退 → 重做后续阶段（`execute` 内循环）。
+  - 终审不通过 → 回退到 `acceptance_rollback_target`（默认 implementation）重做。
+  - 回退预算 `max_rollbacks`（默认 2）耗尽 → 记 `failure_memory.md` 并停止。
+  - 每次回退写入决策日志（`append_decision`），发布 `PHASE_ROLLED_BACK`。
+- `tests/test_rollback_rules.py` — 8 个用例：树回退、映射、任务失败回退恢复、
+  审查失败回退恢复、预算耗尽停止、终审回退恢复、终审反复拒绝停止。
+
+### 与 Pi 的对应
+
+Pi 的 loop 失败后靠「换方法或停止」；这里把 task_lifecycle 的
+「回退到问题阶段」固化为 Supervisor 的自动行为，仍是纯注入函数、
+无 UI 依赖、可离线测试。
+
+### 如何测试
+
+```bash
+uv run pytest tests/test_rollback_rules.py
+```
+
+## 增量：工具补齐 + Fixer + 团队工厂（非 LLM 框架层）
+
+### 为什么
+
+new.md 的工具清单里 docker / database 只有文档没有实现；reflection
+缺 `fixer.py`；角色体系只有 roles/*.md，没有默认装配层。本增量补齐
+这些纯框架逻辑，LLM 全部保持注入函数（`reason_fn` 等）。
+
+### 新增
+
+- `agent/tools/database.py` — `DatabaseTool`：
+  - `operation="query"` 只读：SELECT/SHOW/DESCRIBE/EXPLAIN/PRAGMA，
+    拒绝写语句与 `SELECT INTO OUTFILE` / `FOR UPDATE`；
+  - `operation="migrate"` 只走工作区内迁移脚本（对齐 database.md）；
+  - 标识符白名单 `[A-Za-z0-9_]+` 防注入；凭证走 `MYSQL_PWD` / `PGPASSWORD`
+    环境变量，不落命令行与代码。
+- `agent/tools/docker.py` — `DockerTool`：ps/images/logs/inspect/
+  compose config/build 白名单；run/exec/rm/push/up 需人工确认。
+- `agent/reflection/fixer.py` — `Fixer` / `FixPlan`：结构化诊断 →
+  「修哪里、修什么、怎么验证」的修复任务文本；`Reflector.plan_fix` 复用。
+- `agent/agents/team.py` — `build_team(workspace, memory, reason_fn)`：
+  按 task_type 装配 9 个角色 Agent（工具集 + 角色文件），注册进 Router，
+  与 `run_project` 直接配合。
+
+### 测试
+
+- `tests/test_team_and_tools.py` — 14 个用例：只读判定、标识符校验、
+  CLI 拼装、迁移越界拒绝、docker 白名单、Fixer 诊断、团队装配。
+
+```bash
+uv run pytest tests/test_team_and_tools.py
+```
+
+## 增量：audit 拆分 + JS/TS 分析 + Embedding 检索骨架（非 LLM 框架层）
+
+### 为什么
+new.md「十一、Audit Agent 重构」要求 audit/ 拆成五个独立 checker；
+「四、2. AST 分析」要求 JavaScript 分析；「四、3. Embedding Code Search」要求向量检索。
+本轮补齐这些纯框架逻辑，LLM 保持注入函数（embed_fn 等）。
+
+### 改了什么
+- `agent/audit/` 拆分：
+  - `types.py` — AuditFinding / AuditReport / SEVERITY_ORDER（共享类型）
+  - `scanning.py` — 零依赖逐行扫描 scan_lines / iter_source_files
+  - `code_quality.py` — TODO/FIXME（支持 #、//、/* */ 三种注释形态）
+  - `security_scan.py` — SQL 拼接 / 硬编码密钥 / eval / shell=True / innerHTML
+  - `architecture_check.py` — 交付文档齐全性（4 个必需文档）
+  - `performance_check.py` — 循环内 DB 查询(N+1) / sleep 启发式
+  - `documentation_check.py` — README.md / api.md 存在性
+  - `audit_agent.py` 改为编排器，公共 API（audit / write_report / extra_patterns）不变
+- `agent/codebase/analyzer.py` — Python 走 AST；JS/TS/TSX/JSX 走零依赖正则
+  启发式（function / 箭头函数 / 类 / import / JSDoc 首行），FileSummary 输出不变
+- `agent/codebase/dependency_graph.py` — _module_of 支持 JS 后缀
+- `agent/codebase/vector_index.py` — rag_keywords / cosine / VectorIndex 分块检索
+- `agent/codebase/search.py` — 注入 embed_fn 后自动切换向量检索（复用文件缓存，惰性建索引）
+
+### 与 Pi 的对应
+Pi 的 embedding 检索依赖外部向量库；这里用「注入 embed_fn + 纯标准库余弦」做可落地骨架，
+接口不变，后续可无缝换真实 embedding 模型。
+
+### 如何测试
+pytest tests/test_audit_split.py tests/test_codebase_analysis.py
+（agent 相关 7 个测试文件合计 116 passed）
+## 增量：接入 DeepSeek LLM 并完成真实端到端测试
+
+### 为什么
+前面所有轮次把 LLM 留在注入函数（reason_fn / decide_fn / review_fn / decompose_fn），
+本轮用真实 DeepSeek API（deepseek-v4-flash）把它们全部接上，跑通
+「计划 → 执行 → 审查」真实闭环，并修复了真实运行暴露的问题。
+
+### 改了什么
+- `agent/llm/`（新包）：
+  - `config.py` — .env / 环境变量 → LLMConfig；密钥只走 DEEPSEEK_API_KEY，
+    `.env` 已加入 .gitignore，仓库内零密钥
+  - `provider.py` — OpenAICompatibleProvider（httpx 调 /chat/completions），
+    content 为空时回退 reasoning_content（DeepSeek v4 推理模型）
+  - `bindings.py` — make_reason_fn / make_decide_fn / make_review_fn /
+    make_route_fn / make_decompose_fn；全部要求 JSON 输出，解析失败回退规则版
+- `agent/planner/execution_planner.py` + `agent/supervisor/supervisor.py` —
+  create_execution_plan / Supervisor 增加 decompose_fn 注入点
+- `agent/router/router.py` — task_type=general 回退 Backend（LLM 拆解的通用任务）
+- `agent/core/context.py` + `agent/core/loop.py` — 失败原因注入下一轮上下文
+  （history 带 `-> fail: <原因>`），让 LLM 看到反馈并自我纠错
+- `agent/llm/bindings.py` — decide prompt 注入工具参数契约与
+  Windows 命令提示（pwd→cd 等），收敛规则（产物存在即 finish）
+- `agent/tools/file.py` — 传入 content 且未指定操作时默认 write（容错）
+- `agent/tools/terminal.py` — 弃用 text=True，改字节捕获 + UTF-8 容错解码
+  （修复 Windows GBK 解码崩溃）
+- `agent/runner.py` — run_llm_project() 一键入口
+- `scripts/llm_demo.py` — 真实端到端演示脚本
+- `tests/test_llm_provider.py` — 16 个离线用例（httpx mock + fake provider）
+
+### 真实端到端验证（DeepSeek deepseek-v4-flash）
+- 冒烟：provider 单次调用返回正常（reasoning_content 字段确认）
+- demo：任务「写 hello.py 打印 hello world 并运行验证」跑通闭环：
+  LLM 拆解任务树 → ProductManager 产出 prd.md → Backend 写出 hello.py 并运行 →
+  Tester 验证输出；失败反馈生效（pwd 不识别后改用 Windows 命令）
+- 已知问题：单任务收敛偏慢（15-25 步），LLM 倾向重复写/验证同一目标；
+  已加收敛规则，后续可进一步收紧 max_steps 或 finish 引导
+
+### 与 Pi 的对应
+Pi 的模型层在 tau_ai/；这里 agent/llm/ 是同样的 provider 抽象，
+但更轻（httpx 单客户端 + JSON 契约 prompt），核心 loop 不感知具体模型。
+
+### 如何测试
+pytest tests/test_llm_provider.py
+python scripts/llm_demo.py --goal "..." --tech-stack "..."  # 需 .env 密钥

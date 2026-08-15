@@ -20,3 +20,15 @@ website/.hugo_build.lock
 
 # Agent tools
 .firecrawl/
+
+# Secrets — 严禁上传 API 密钥
+.env
+.env.*
+!.env.example
+*.pem
+agent/**/secrets*
+
+# Test artifacts
+.pytest-tmp/
+.llm-demo-out/
+.ruff_cache/

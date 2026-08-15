@@ -64,3 +64,5 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+# 仓库根目录加入导入路径，使根级 agent/ 运行时包可测试
+pythonpath = ["."]
