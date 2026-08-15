@@ -184,7 +184,7 @@ def test_build_team_registers_role_agents(tmp_path: Path) -> None:
     assert {"file", "patch", "terminal", "test_runner"} <= tools
 
     tester = router.route(TaskNode(title="x", task_type="testing"))
-    assert tester.tool_names() == ["terminal", "test_runner"]
+    assert tester.tool_names() == ["file", "terminal", "test_runner"]
 
     devops = router.route(TaskNode(title="x", task_type="deploy"))
     assert "docker" in devops.tool_names() and "package_manager" in devops.tool_names()

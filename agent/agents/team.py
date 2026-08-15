@@ -46,7 +46,7 @@ _TEAM: dict[str, tuple[str, str, tuple[str, ...]]] = {
         ("file", "patch", "terminal", "test_runner", "package_manager"),
     ),
     "database": ("Database", "database_engineer.md", ("file", "patch", "terminal", "database")),
-    "testing": ("Tester", "tester.md", ("terminal", "test_runner")),
+    "testing": ("Tester", "tester.md", ("file", "terminal", "test_runner")),
     "security": ("Security", "security_auditor.md", ("file", "terminal", "browser")),
     "review": ("Reviewer", "code_reviewer.md", ("file", "patch")),
     "deploy": ("DevOps", "devops_engineer.md", ("terminal", "package_manager", "docker")),

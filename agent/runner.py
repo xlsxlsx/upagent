@@ -28,7 +28,7 @@ from pathlib import Path
 from agent.agents.team import build_team
 from agent.audit.audit_agent import AuditAgent
 from agent.communication.event import EventBus
-from agent.core.loop import DecideFn, RepoMapProvider
+from agent.core.loop import DecideFn, RepoMapProvider, StepFn
 from agent.core.request import UserRequest
 from agent.core.state import ProjectState
 from agent.llm.bindings import (
@@ -36,6 +36,7 @@ from agent.llm.bindings import (
     make_decompose_fn,
     make_reason_fn,
     make_review_fn,
+    make_step_fn,
     render_tool_contracts,
 )
 from agent.llm.provider import LLMProvider
@@ -114,6 +115,7 @@ def run_project(
     events: EventBus | None = None,
     decompose_fn: Callable[..., TaskTree] = decompose,
     max_steps: int = 10,
+    step_fn: StepFn | None = None,
 ) -> ProjectOutcome:
     """一站式流水线：用户输入 → 计划 → 执行 → 审查 → 交付结论。"""
     request = UserRequest(
@@ -139,6 +141,7 @@ def run_project(
         repo_map_provider=repo_map_provider,
         decompose_fn=decompose_fn,
         max_steps=max_steps,
+        step_fn=step_fn,
         output_dir=output_dir,
     )
     result = supervisor.run_request(request)
@@ -170,6 +173,7 @@ def run_llm_project(
     repo_map_provider: RepoMapProvider | None = None,
     acceptance_fn: AcceptanceFn | None = None,
     max_steps: int = 10,
+    use_llm_step: bool = True,
 ) -> ProjectOutcome:
     """LLM 版端到端入口：思考 / 决策 / 审查 / 拆解全部由 provider 驱动。
 
@@ -183,6 +187,16 @@ def run_llm_project(
         provider,
         tool_names.get,
         contracts=lambda name: render_tool_contracts(tool_names.get(name) or []),
+    )
+    step_fn = (
+        make_step_fn(
+            provider,
+            tool_names.get,
+            contracts=lambda name: render_tool_contracts(tool_names.get(name) or []),
+            decide_fallback=decide_fn,
+        )
+        if use_llm_step
+        else None
     )
     decompose_fn = make_decompose_fn(provider) if use_llm_decompose else decompose
     review_fn = make_review_fn(provider) if use_llm_review else None
@@ -200,4 +214,5 @@ def run_llm_project(
         repo_map_provider=repo_map_provider,
         events=events,
         max_steps=max_steps,
+        step_fn=step_fn,
     )

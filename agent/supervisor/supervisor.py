@@ -24,12 +24,15 @@ run_request() 在 run() 之上叠加「计划-执行-审查」完整闭环：
 
 from __future__ import annotations
 
+import re
+import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from agent.communication.event import Event, EventBus, EventType
-from agent.core.loop import AgentLoop, DecideFn, LoopResult, RepoMapProvider
+from agent.core.loop import AgentLoop, DecideFn, LoopResult, RepoMapProvider, StepFn
 from agent.core.request import UserRequest
 from agent.core.state import PhaseStatus, ProjectState
 from agent.memory.store import MemoryStore
@@ -58,6 +61,11 @@ ROLLBACK_TARGETS: dict[str, str] = {
     # requirement / architecture 失败 → 没有更早阶段可回退（重试耗尽即停）
 }
 
+# 任务标题中声明的产物文件路径（用于确定性验收，防 LLM 谎报完成）
+_FILE_TOKEN_RE = re.compile(
+    r"[A-Za-z0-9_\-./\\]+\.(?:py|js|ts|jsx|tsx|md|json|yml|yaml|toml|html|css|sql|txt)\b"
+)
+
 
 @dataclass(frozen=True)
 class SupervisorResult:
@@ -85,6 +93,7 @@ class Supervisor:
     max_tasks: int = 100  # 防失控：一次 run 最多处理的任务数
     max_rollbacks: int = 2  # 回退预算：超过即记 failure_memory 并停止
     max_steps: int = 10  # 单任务循环步数上限（收敛控制，默认 10）
+    step_fn: StepFn | None = None  # 一步式 reason+decide（LLM 快路径，可选）
     # 计划-执行-审查 闭环
     review_fn: TaskReviewFn | None = None  # 每个任务完成后的审查门禁
     acceptance_fn: AcceptanceFn | None = None  # 全部完成后的终审验收
@@ -191,6 +200,7 @@ class Supervisor:
             memory=self.memory,
             repo_map_provider=self.repo_map_provider,
             max_steps=self.max_steps,
+            step_fn=self.step_fn,
         )
         for _ in range(1 + self.max_retries):
             result = loop.run(node.title)
@@ -201,7 +211,28 @@ class Supervisor:
         return False
 
     def _review(self, node: TaskNode, result: LoopResult) -> bool:
-        """任务级审查门禁：review_fn 返回 False 则本轮不算完成。"""
+        """任务级审查门禁：先做确定性产物检查（标题声明的文件路径必须真实存在，
+        防 LLM 谎报完成），再走 review_fn（返回 False 则本轮不算完成）。"""
+        if not self._mentioned_files_exist(node.title):
+            self.events.publish(
+                Event(
+                    type=EventType.REVIEW_FAILED,
+                    source="Reviewer",
+                    payload=f"{node.title} (missing artifact)",
+                )
+            )
+            self.state.record_error(f"review failed (missing artifact): {node.title}")
+            return False
+        if not self._tests_pass(node):
+            self.events.publish(
+                Event(
+                    type=EventType.REVIEW_FAILED,
+                    source="Reviewer",
+                    payload=f"{node.title} (tests failed)",
+                )
+            )
+            self.state.record_error(f"review failed (tests failed): {node.title}")
+            return False
         if self.review_fn is None:
             return True
         summary = "\n".join(result.history)
@@ -216,6 +247,37 @@ class Supervisor:
         if not passed:
             self.state.record_error(f"review failed: {node.title}")
         return passed
+
+    def _mentioned_files_exist(self, title: str) -> bool:
+        """确定性验收：标题中提到的产物文件至少一个真实存在；无路径引用时不设限制。"""
+        base = self.output_dir or Path.cwd()
+        tokens = _FILE_TOKEN_RE.findall(title)
+        if not tokens:
+            return True
+        return any(
+            (base / token).is_file() or Path(token).is_file() for token in tokens
+        )
+
+    def _tests_pass(self, node: TaskNode) -> bool:
+        """确定性验收（testing 任务）：产物目录里存在测试时，真实运行 pytest，
+        全部通过才算合格；无测试/无产物目录时不设限制。"""
+        if node.task_type != "testing" or self.output_dir is None:
+            return True
+        base = self.output_dir
+        has_tests = (base / "tests").is_dir() or any(base.rglob("test_*.py"))
+        if not has_tests:
+            return True
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"],
+                cwd=str(base),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+        return proc.returncode == 0
 
     def _rollback(self, plan: ExecutionPlan, node: TaskNode) -> bool:
         """任务失败后的回退：按 ROLLBACK_TARGETS 找起点，预算内执行。"""

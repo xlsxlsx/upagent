@@ -47,6 +47,8 @@ class Action:
 
 # 决策函数：思考 → 行动（生产环境由 Planner/LLM 提供）
 DecideFn = Callable[[Thought], Action]
+# 一步式（思考+决策合并）：(agent_name, role_prompt, task, context) -> (Thought, Action)
+StepFn = Callable[[str, str, str, str], tuple[Thought, Action]]
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,7 @@ class AgentLoop:
     context_builder: ContextBuilder = field(default_factory=ContextBuilder)
     max_steps: int = 10  # 防失控上限（收敛控制）
     repo_map_provider: RepoMapProvider | None = None  # Code Intelligence 注入
+    step_fn: StepFn | None = None  # 一步式 reason+decide（LLM 版快路径，可选）
 
     def run(self, task: str) -> LoopResult:
         """对单个任务执行 思考→决策→执行→记录 循环，直到 finish。
@@ -92,10 +95,15 @@ class AgentLoop:
             # 步数压力提示：让 LLM 在预算内收敛，避免无意义重复
             context += f"\n\n## Progress\nStep {step}/{self.max_steps} for this task. " \
                        "Finish as soon as the goal is met; avoid repeating successful steps."
-            # 第二步：Agent 思考
-            thought = self.agent.reason(task, context)
-            # 第三步：决定行动
-            action = self.decide_fn(thought)
+            # 第二步：Agent 思考；第三步：决定行动
+            # 快路径：step_fn 一次调用完成「思考+决策」；慢路径：reason + decide 两次调用
+            if self.step_fn is not None:
+                thought, action = self.step_fn(
+                    self.agent.name, self.agent.role_prompt(), task, context
+                )
+            else:
+                thought = self.agent.reason(task, context)
+                action = self.decide_fn(thought)
             if action.kind == "finish":
                 history.append(f"step {step}: finish ({action.note})")
                 self.state.mark_completed(task)
@@ -103,7 +111,12 @@ class AgentLoop:
                 return LoopResult(steps=step, finished=True, history=tuple(history))
             # 第四步：执行工具
             result = self._execute(action)
-            entry = f"step {step}: {action.kind} -> {'ok' if result.ok else 'fail'}"
+            status = "ok" if result.ok else "fail"
+            brief_args = {k: v for k, v in action.args.items() if k != "content"}
+            args_text = ", ".join(f"{k}={v[:60]}" for k, v in brief_args.items())
+            entry = f"step {step}: {action.kind} -> {status}"
+            if args_text:
+                entry += f" [{args_text}]"
             if not result.ok:
                 # 失败原因反馈给下一轮，LLM 才能针对性修正
                 entry += f": {result.output[:200]}"

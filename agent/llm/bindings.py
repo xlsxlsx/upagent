@@ -6,10 +6,12 @@ LLM 输出全部要求 JSON；解析失败回退规则实现，保证流程不�
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable
 
 from agent.core.agent import ReasonFn, Thought
-from agent.core.loop import Action, DecideFn
+from agent.core.loop import Action, DecideFn, StepFn
 from agent.llm.provider import ChatMessage, LLMProvider
 from agent.planner.decomposition import decompose
 from agent.planner.planner import DecomposeFn, Planner
@@ -89,7 +91,13 @@ def render_tool_contracts(
     return "\n".join(lines)
 
 
-_DECOMPOSE_SYSTEM = """你是项目规划师。把用户目标拆成按执行顺序排列的任务树。
+_DECOMPOSE_SYSTEM = """你是项目规划师。把用户目标拆成按执行顺序排列的任务树。约束（最高优先级）：
+1. 任务总数不超过 4 个；小型目标 2-3 个即可。任务粒度要粗：同类型强相关的步骤必须
+   合并为一个任务（例如「实现冒泡/快速/归并」合并为「实现三种排序」，
+   「写测试+运行测试」合并为「编写测试并运行通过」）。
+2. 每个任务标题必须写明关键产物文件的相对路径（如 sorting.py、
+   tests/test_sorting.py），便于验收核对。
+3. 标题使用祈使句，说明产出与验证方式。
 任务类型取值：requirement / architecture / backend / frontend / database /
 testing / security / deploy / general。
 只输出 JSON：{{"tasks": [{{"title": "任务标题", "task_type": "类型"}}]}}"""
@@ -99,6 +107,160 @@ _DECOMPOSE_USER = """Goal: {goal}
 Tech stack: {tech_stack}
 
 只输出 JSON。"""
+
+
+_STEP_SYSTEM = """{role}
+
+# Tools (Windows cmd environment)
+Available tools: {tools}
+
+Tool contracts:
+{contracts}
+
+# Action format
+Think briefly (at most 80 words, no long reasoning), then output exactly ONE action
+as a JSON object inside an ```action fence:
+```action
+{{"kind": "<tool name or finish>", "args": {{"param": "value"}}, "note": "why"}}
+```
+
+# Rules (highest priority)
+1. Windows commands only: use cd / dir / type / findstr / python,
+   not pwd / ls / cat / grep / python3.
+2. kind=finish ONLY when the goal is verifiably done (artifacts written and validated).
+   If recent steps already show success, finish immediately instead of repeating.
+3. One most-valuable action per step; the step budget is limited (see progress).
+4. If the last identical action failed, change approach instead of retrying verbatim.
+5. Bias toward action: as soon as you know what to write, write it with the file tool.
+   Pure inspection (dir/type) is allowed at most 2 steps per task;
+   from step 3 onward, either write the artifact or finish.
+6. A successful terminal inspection is NOT progress: do not loop dir/type.
+   Finish only when the declared artifact file actually exists.
+7. If a pytest/test run fails, FIX the implementation or the test file with the
+   file/patch tool next; never re-run the same failing command more than twice.
+8. Do not blindly overwrite an existing file: read it first (file read) and keep
+   the good parts when editing."""
+
+
+_STEP_USER = """## Task
+{task}
+
+## Context
+{context}
+
+Give your brief reasoning, then exactly one action JSON inside an ```action fence.
+If you already have enough information, produce the artifact in THIS step."""
+
+
+_ACTION_FENCE_RE = re.compile(r"```(?:action|json)?\s*(.*?)```", re.DOTALL)
+_DSML_TAG_RE = re.compile(r"<\s*/?\s*[^>]*DSML[^>]*>", re.IGNORECASE)
+
+
+def parse_action_json(text: str) -> dict | None:
+    """从 LLM 输出中提取动作 JSON，容忍 ```action/```json 围栏、DSML 包裹与前后杂文。
+    解析失败返回 None（由调用方走回退路径）。"""
+    stripped = _DSML_TAG_RE.sub("", text)
+    for block in _ACTION_FENCE_RE.findall(stripped):
+        candidate = block.strip()
+        try:
+            data = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    start = stripped.find("{")
+    while start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(stripped)):
+            char = stripped[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        data = json.loads(stripped[start:index + 1])
+                    except (json.JSONDecodeError, TypeError):
+                        break
+                    return data if isinstance(data, dict) else None
+        start = stripped.find("{", start + 1)
+    return None
+
+
+def _action_from_data(data: dict, thought: Thought) -> Action | None:
+    """{kind, args, note} -> Action；finish/空 kind 按 finish 处理，非法 kind 返回 None。"""
+    kind = str(data.get("kind") or "finish").strip()
+    raw_args = data.get("args")
+    args = (
+        {str(k): str(v) for k, v in raw_args.items()}
+        if isinstance(raw_args, dict)
+        else {}
+    )
+    note = str(data.get("note") or "")
+    if kind.lower() == "finish":
+        return Action.finish(note=note or thought.content[:100])
+    if not kind:
+        return None
+    return Action(kind=kind, args=args, note=note)
+
+
+def make_step_fn(
+    provider: LLMProvider,
+    tool_names: Callable[[str], list[str]] | None = None,
+    contracts: Callable[[str], str] | None = None,
+    decide_fallback: DecideFn | None = None,
+) -> StepFn:
+    """一步式（reason+decide 合并）：一次 LLM 调用输出简短推理 + 动作 JSON。
+    解析失败时回退 decide_fallback（再失败走规则 Planner）。
+    相比「reason 长推理 + decide 二次调用」，可把单步延迟从 ~25s 降到 ~2s。"""
+
+    def step(
+        agent_name: str, role_prompt: str, task: str, context: str
+    ) -> tuple[Thought, Action]:
+        tools = tool_names(agent_name) if tool_names is not None else []
+        details = contracts(agent_name) if contracts is not None else ""
+        system = _STEP_SYSTEM.format(
+            role=role_prompt,
+            tools=", ".join(tools) if tools else "(none)",
+            contracts=details or "(none)",
+        )
+        user = _STEP_USER.format(task=task, context=context)
+        thought = Thought(agent_name=agent_name, task=task, content="")
+        try:
+            text = provider.complete(
+                [ChatMessage(role="system", content=system),
+                 ChatMessage(role="user", content=user)],
+                temperature=0.2,
+                max_tokens=2048,
+            ).strip()
+        except Exception:
+            text = ""
+        thought = Thought(agent_name=agent_name, task=task, content=text)
+        data = parse_action_json(text) if text else None
+        if data is not None:
+            action = _action_from_data(data, thought)
+            if action is not None:
+                return thought, action
+        if decide_fallback is not None:
+            try:
+                return thought, decide_fallback(thought)
+            except Exception:
+                pass
+        return thought, Planner().decide(thought)
+
+    return step
 
 
 def make_reason_fn(provider: LLMProvider) -> ReasonFn:
@@ -144,20 +306,12 @@ def make_decide_fn(
                     ChatMessage(role="user", content=user),
                 ],
                 temperature=0.0,
+                max_tokens=512,
             )
         except Exception:
             return Planner().decide(thought)
-        kind = str(data.get("kind") or "finish")
-        raw_args = data.get("args")
-        args = (
-            {str(k): str(v) for k, v in raw_args.items()}
-            if isinstance(raw_args, dict)
-            else {}
-        )
-        note = str(data.get("note") or "")
-        if kind.lower() == "finish":
-            return Action.finish(note=note or thought.content[:100])
-        return Action(kind=kind, args=args, note=note)
+        action = _action_from_data(data, thought)
+        return action if action is not None else Planner().decide(thought)
 
     return decide
 
@@ -176,7 +330,7 @@ def make_review_fn(provider: LLMProvider) -> TaskReviewFn:
             ),
         ]
         try:
-            data = provider.complete_json(messages, temperature=0.0)
+            data = provider.complete_json(messages, temperature=0.0, max_tokens=512)
         except Exception:
             return True
         return bool(data.get("passed", True))
@@ -196,7 +350,7 @@ def make_route_fn(provider: LLMProvider) -> LlmRouteFn:
             ),
         ]
         try:
-            data = provider.complete_json(messages, temperature=0.0)
+            data = provider.complete_json(messages, temperature=0.0, max_tokens=256)
         except Exception:
             return ""
         return str(data.get("agent") or "")
@@ -219,7 +373,7 @@ def make_decompose_fn(
             ),
         ]
         try:
-            data = provider.complete_json(messages, temperature=0.2)
+            data = provider.complete_json(messages, temperature=0.2, max_tokens=1024)
             return _build_tree(task, data)
         except Exception:
             if tech_stack:

@@ -320,3 +320,53 @@ pytest tests/  (agent 相关 9 个文件 139 passed)
 - 候选优化：把验收判据从 LLM 自述改为**确定性检查**（如 requirement 中声明产物路径 +
   运行 pytest 校验存在性/退出码），或引入 --require-tests 开关强制测试文件落盘后再 finish。
 - 可继续：重跑同一场景验证"测试文件缺失"是否复现，再决定是否收紧 finish 引导。
+## 增量：端到端提速 13 倍（一步式 step_fn + 确定性验收门禁）
+
+### 动机
+排序场景首轮实测约 17 分钟，用户要求在不牺牲正确性的前提下提速。
+
+### 定位（真实测速）
+- deepseek-v4-flash 单次短回答 ~1s，但「自由推理 + 下一步计划」提示词会触发长思考：
+  reason 一步 ~23s（1812 字符），decide ~1.9s；每步两次调用 ≈ 25s。
+- 让模型直接输出动作 JSON（一步式）时仅 ~1.4s：推理被大幅压缩。
+
+### 改动
+- agent/llm/bindings.py
+  - 新增 make_step_fn：reason+decide 合并为一次调用（简短推理 ≤80 词 + `ction JSON），
+    max_tokens=1024→2048（减少大文件写入截断）；解析失败回退 decide_fn / 规则 Planner。
+  - 新增 parse_action_json：容忍 action/json 围栏、DSML 包裹、前后杂文、平衡括号扫描。
+  - 收敛提示词加强：禁止 dir/type 探测超过 2 步、pytest 失败必须修文件而非重跑、
+    不盲目覆盖已有文件、成功探测不算进度。
+  - decompose 提示词：任务 ≤4 个、同类型合并、标题必须带产物文件路径。
+  - decide/review/route/decompose 的 max_tokens 收紧为 512/512/256/1024。
+- agent/core/loop.py
+  - 新增 StepFn 快路径（可选字段，不破坏原 reason+decide 两段式）。
+  - 历史条目带动作参数摘要（content 除外），让 LLM 看到自己实际执行了什么。
+- agent/supervisor/supervisor.py
+  - 确定性产物见证：标题声明的文件路径必须真实存在，否则 review 失败（拦截谎报完成）。
+  - 确定性 pytest 门禁：testing 任务在产物目录真实运行 pytest，全绿才算合格。
+- agent/agents/team.py：Tester 增加 file 工具（此前要写测试却无写文件能力，是
+  上一轮「测试文件缺失」的根因之一）。
+- scripts/llm_demo.py：--max-steps / --two-phase 开关 + LLM 调用计时统计。
+
+### 实测（同一排序场景）
+- 三轮迭代：34s（首任务失败，terminal 探测死循环）→ 86s（Tester 覆盖好测试、
+  pytest 2 failed 卡死）→ 77s 通过。
+- 最终：finished=True, accepted=True, completed=2 tasks，LLM 调用 17 次 / 78.5s，
+  端到端约 77 秒，比首轮 17 分钟快约 13 倍。
+- 产物独立验证：sorting.py 三种排序（边界 + 200 组随机 + 非原地）全过；
+  LLM 写的 tests/test_sorting.py 真实存在，20 个用例（边界/随机/非变异）pytest 全绿。
+- 确定性门禁两次拦截 Tester 谎报 finish（测试文件未写入），强制重试后真写真跑——
+  上一轮「测试文件缺失 + 谎报通过」的问题被结构性修复。
+
+### 已知残留
+- 大动作 JSON（整文件写入）偶发被截断 → parse 失败走回退 finish → 见证门禁拒绝并重试；
+  已用 2048 tokens 缓解，仍可能浪费 1-2 轮。
+- 终审 AuditAgent 文档清单（README/架构文档等）与小型算法任务不匹配，报告仍 PASS 但
+  提示文档缺失；后续可为小型任务关掉文档类检查。
+
+### 如何测试
+pytest tests/test_llm_step.py  # step_fn/解析/见证/pytest 门禁 16 例
+pytest tests/ (agent 相关 10 文件 141 passed)
+python scripts/llm_demo.py --goal "..." --out .llm-demo-out   # 真实 LLM（默认一步式）
+python scripts/llm_demo.py --two-phase                        # 对比基线（慢路径）
