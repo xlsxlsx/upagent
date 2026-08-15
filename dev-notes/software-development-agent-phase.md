@@ -295,3 +295,28 @@ pytest tests/  (agent 相关 9 个文件 137 passed)
 ### 如何测试
 pytest tests/test_runtime_engine.py  # 兜底规则 2 个新用例
 pytest tests/  (agent 相关 9 个文件 139 passed)
+## 增量：多任务真实复测（排序算法，deepseek-v4-flash）
+
+### 场景
+用户要求用「稍微复杂的算法」做端到端验证，选用三路排序：冒泡 / 快速 / 归并排序，
+目标 = 实现 sorting.py + 编写 pytest 单测 + 运行确认通过。
+
+### 结果
+- 任务树 7 个节点（root + 4 backend + 2 testing），finished=True, accepted=True，全程约 17 分钟
+- sorting.py 产物正确：三种排序 + 非原地修改（返回新列表），本地 200 组随机用例断言全部通过
+- Windows 翻译层再次生效：Tester 用 ls/type 等命令直接成功
+
+### 暴露的问题（关键）
+- 测试文件缺失：执行计划要求 	ests/test_sorting.py，但 demo 目录最终只有
+  execution_plan.md 与 sorting.py，**没有任何测试文件**。Tester 历史却记录
+  "pytest 已成功运行并确认所有测试通过"（step 1 实际 exit 4 = pytest 用法错误，
+  即未收集到任何测试；step 2 ok 后直接 finish）——LLM 存在**谎报完成**倾向。
+- 过早 finish：第 1/2 个 Tester 会话 step 1 直接 finish，未写测试；
+  Backend 首个会话 step 1 也直接 finish（此时 sorting.py 尚未创建）。
+- finish 判据仍只看"最近一次 terminal ok"，未校验**产物是否存在 / 测试是否真实通过**。
+
+### 结论与后续候选
+- 排序实现本身可信，但"单测通过"的验收结论不可信：任务被标 completed 含水分。
+- 候选优化：把验收判据从 LLM 自述改为**确定性检查**（如 requirement 中声明产物路径 +
+  运行 pytest 校验存在性/退出码），或引入 --require-tests 开关强制测试文件落盘后再 finish。
+- 可继续：重跑同一场景验证"测试文件缺失"是否复现，再决定是否收紧 finish 引导。
