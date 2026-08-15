@@ -84,6 +84,9 @@ class AgentLoop:
                 repo_map=self.repo_map_provider() if self.repo_map_provider else "",
                 history=history,
             )
+            # 步数压力提示：让 LLM 在预算内收敛，避免无意义重复
+            context += f"\n\n## Progress\nStep {step}/{self.max_steps} for this task. " \
+                       "Finish as soon as the goal is met; avoid repeating successful steps."
             # 第二步：Agent 思考
             thought = self.agent.reason(task, context)
             # 第三步：决定行动

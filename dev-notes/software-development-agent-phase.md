@@ -237,3 +237,33 @@ Pi 的模型层在 tau_ai/；这里 agent/llm/ 是同样的 provider 抽象，
 ### 如何测试
 pytest tests/test_llm_provider.py
 python scripts/llm_demo.py --goal "..." --tech-stack "..."  # 需 .env 密钥
+## 增量：收敛优化（max_steps + finish 引导 + Windows 命令翻译）+ 新建远程仓库
+
+### 为什么
+真实端到端测试发现单任务收敛偏慢（LLM 倾向重复写/验证同一目标，用满 25 步）。
+用户要求三项优化 + 新建仓库并推送。
+
+### 改了什么
+- `agent/supervisor/supervisor.py` + `agent/core/loop.py` + `agent/runner.py` —
+  max_steps 默认 25 → 15，Supervisor 新增 max_steps 字段透传 AgentLoop；
+  run_project / run_llm_project 均暴露 max_steps 参数
+- `agent/core/loop.py` — 每步向上下文注入步数压力提示
+  （"Step n/N ... Finish as soon as the goal is met"），LLM 在预算内收敛
+- `agent/llm/bindings.py` — finish 引导加强：明确完成判据、
+  "最近记录显示产物已写入则必须 finish"、连续重复 = 应 finish、预算有限
+- `agent/tools/terminal.py` — Windows 命令翻译层 translate_command：
+  pwd→cd、ls→dir、cat→type、grep→findstr、python3→python、touch→type nul >、
+  rm→del 等；翻译结果二次过黑名单（rm 仍被拦截，确保安全）
+- `tests/test_terminal_translate.py` — 5 个翻译层用例
+- 远程仓库：GitHub xlsxlsx/upagent（私有）已创建并推送
+
+### 真实端到端复测（deepseek-v4-flash）
+- 任务步数被 max_steps=15 封顶（此前可到 25+）
+- Windows 命令翻译生效：ls/cat/pwd 等直接执行成功
+- 失败反馈继续工作：printf 不被识别后 LLM 改用可用命令
+- 已知：LLM 仍倾向用满步数，收敛引导可继续收紧（如降低 max_steps 或
+  增加"连续两次相同成功动作 → 强制 finish"的规则兜底）
+
+### 如何测试
+pytest tests/test_terminal_translate.py
+pytest tests/  (agent 相关 9 个文件 137 passed)

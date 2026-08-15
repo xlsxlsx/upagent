@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +32,30 @@ _FORBIDDEN_PATTERNS: tuple[str, ...] = (
     "> /dev/",
 )
 
+# Windows 上常见 Unix 命令 → cmd 等价物（词边界替换；顺序敏感，长模式在前）
+_UNIX_TRANSLATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"\bmkdir\s+-p\b"), "mkdir"),
+    (re.compile(r"\bpwd\b"), "cd"),
+    (re.compile(r"\bls(\s+-\w+)*"), "dir"),
+    (re.compile(r"\bcat\b"), "type"),
+    (re.compile(r"\bcp\b"), "copy"),
+    (re.compile(r"\bmv\b"), "move"),
+    (re.compile(r"\bgrep\b"), "findstr"),
+    (re.compile(r"\bpython3\b"), "python"),
+    (re.compile(r"\btouch\b"), "type nul >"),
+    (re.compile(r"\brm\b"), "del"),  # rm -> del 会被黑名单二次拦截，确保安全
+)
+
+
+def translate_command(command: str) -> str:
+    """把常见 Unix 命令翻译为 Windows cmd 等价物（仅 Windows，其他平台原样返回）。"""
+    if os.name != "nt":
+        return command
+    translated = command
+    for pattern, replacement in _UNIX_TRANSLATIONS:
+        translated = pattern.sub(replacement, translated)
+    return translated
+
 
 @dataclass
 class TerminalTool(Tool):
@@ -48,6 +74,14 @@ class TerminalTool(Tool):
             return ToolResult.failure(
                 f"terminal: command blocked by safety policy (matched {blocked!r})"
             )
+        translated = translate_command(command)
+        # 翻译后的命令二次过黑名单（例如 rm -> del 仍会被拦截）
+        translated_blocked = _match_forbidden(translated)
+        if translated_blocked:
+            return ToolResult.failure(
+                f"terminal: command blocked by safety policy (matched {translated_blocked!r})"
+            )
+        command = translated
         try:
             proc = subprocess.run(
                 command,
