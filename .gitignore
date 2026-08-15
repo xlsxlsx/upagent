@@ -32,3 +32,5 @@ agent/**/secrets*
 .pytest-tmp/
 .llm-demo-out/
 .ruff_cache/
+# Runtime memory artifact
+agent/memory/history.jsonl
