@@ -185,7 +185,16 @@ def test_loop_records_tool_failure(tmp_path: Path) -> None:
 
 
 def test_loop_max_steps_guard(tmp_path: Path) -> None:
-    agent = make_agent(tmp_path, ["ACTION: echo\nARG text=again"], tools=[EchoTool()])
+    # 参数每步不同，避免触发「重复成功动作自动 finish」兜底，验证步数上限
+    agent = make_agent(
+        tmp_path,
+        [
+            "ACTION: echo\nARG text=again1",
+            "ACTION: echo\nARG text=again2",
+            "ACTION: echo\nARG text=again3",
+        ],
+        tools=[EchoTool()],
+    )
     loop = AgentLoop(
         agent=agent,
         decide_fn=Planner().decide,
@@ -194,6 +203,35 @@ def test_loop_max_steps_guard(tmp_path: Path) -> None:
     )
     result = loop.run("x")
     assert not result.finished and result.steps == 3
+
+
+def test_loop_auto_finishes_on_repeated_success(tmp_path: Path) -> None:
+    # 连续两次相同工具 + 相同参数且成功 → 规则兜底强制 finish
+    agent = make_agent(tmp_path, ["ACTION: echo\nARG text=again"], tools=[EchoTool()])
+    state = ProjectState(task="x")
+    loop = AgentLoop(
+        agent=agent,
+        decide_fn=Planner().decide,
+        state=state,
+        max_steps=10,
+    )
+    result = loop.run("x")
+    assert result.finished and result.steps == 2
+    assert "auto-finish" in result.history[-1]
+    assert "x" in state.completed
+
+
+def test_loop_auto_finish_ignores_failures(tmp_path: Path) -> None:
+    # 失败动作不计数：ok 与 fail 交替不会触发兜底
+    agent = make_agent(
+        tmp_path,
+        ["ACTION: boom", "ACTION: echo\nARG text=ok"],
+        tools=[EchoTool(), FailTool()],
+    )
+    result = AgentLoop(
+        agent=agent, decide_fn=Planner().decide, state=ProjectState(task="x")
+    ).run("x")
+    assert result.finished
 
 
 def test_loop_unknown_tool_records_error_not_crash(tmp_path: Path) -> None:

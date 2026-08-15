@@ -67,12 +67,17 @@ class AgentLoop:
     state: ProjectState
     memory: MemoryStore | None = None
     context_builder: ContextBuilder = field(default_factory=ContextBuilder)
-    max_steps: int = 25  # 防失控上限
+    max_steps: int = 10  # 防失控上限（收敛控制）
     repo_map_provider: RepoMapProvider | None = None  # Code Intelligence 注入
 
     def run(self, task: str) -> LoopResult:
-        """对单个任务执行 思考→决策→执行→记录 循环，直到 finish。"""
+        """对单个任务执行 思考→决策→执行→记录 循环，直到 finish。
+
+        兜底规则：连续两次「相同工具 + 相同参数且成功」视为重复劳动，
+        强制 finish，防止 LLM 反复执行同一动作。
+        """
         history: list[str] = []
+        last_success: tuple[str, frozenset[tuple[str, str]]] | None = None
         self.state.current_agent = self.agent.name
         for step in range(1, self.max_steps + 1):
             # 第一步：读取当前状态，拼装上下文（含 Repository Map）
@@ -106,6 +111,19 @@ class AgentLoop:
             if not result.ok:
                 self.state.record_error(f"{action.kind}: {result.output[:200]}")
             self._persist(entry)
+            # 兜底：连续两次相同成功动作 → 强制 finish
+            if result.ok:
+                action_key = (action.kind, frozenset(action.args.items()))
+                if action_key == last_success:
+                    finish_entry = (
+                        f"step {step}: auto-finish "
+                        f"(repeated identical successful action: {action.kind})"
+                    )
+                    history.append(finish_entry)
+                    self._persist(finish_entry)
+                    self.state.mark_completed(task)
+                    return LoopResult(steps=step, finished=True, history=tuple(history))
+                last_success = action_key
         return LoopResult(steps=self.max_steps, finished=False, history=tuple(history))
 
     def _execute(self, action: Action) -> ToolResult:

@@ -267,3 +267,31 @@ python scripts/llm_demo.py --goal "..." --tech-stack "..."  # 需 .env 密钥
 ### 如何测试
 pytest tests/test_terminal_translate.py
 pytest tests/  (agent 相关 9 个文件 137 passed)
+## 增量：收敛再优化（重复动作兜底 + max_steps=10），真实复测通过
+
+### 为什么
+上一轮 max_steps=15 仍偏慢：LLM 倾向用满步数。用户要求两项：
+「连续两次相同成功动作 → 规则兜底强制 finish」+ max_steps 降到 10。
+
+### 改了什么
+- `agent/core/loop.py` —
+  - max_steps 默认 25 → 10
+  - 兜底规则：连续两次「相同工具 + 相同参数且成功」→ auto-finish，
+    记录 auto-finish 事件并正常标记任务完成（Supervisor review 流程不变）
+- `agent/supervisor/supervisor.py`、`agent/runner.py` — max_steps 默认 15 → 10
+- `tests/test_runtime_engine.py` —
+  - 新增 test_loop_auto_finishes_on_repeated_success（连续相同成功 → 2 步自动完成）
+  - 新增 test_loop_auto_finish_ignores_failures（失败动作不计数）
+  - test_loop_max_steps_guard 改为不同参数，避免被兜底规则短路
+- `tests/test_rollback_rules.py` — _STEPS_PER_RUN 改为引用 AgentLoop.max_steps 联动
+
+### 真实端到端复测（deepseek-v4-flash）
+任务「写 hello.py 打印 hello world 并运行验证」：
+- finished=True, accepted=True, completed=3 tasks，全程约 2 分钟（此前 10+ 分钟不收敛）
+- 历史证据：任务 1 与任务 3 由 auto-finish 兜底收敛（重复 file/terminal 动作），
+  任务 2 由 LLM 自主 finish（"hello.py 已创建并成功运行验证"）
+- 产物 hello.py 正确（shebang + docstring + print）
+
+### 如何测试
+pytest tests/test_runtime_engine.py  # 兜底规则 2 个新用例
+pytest tests/  (agent 相关 9 个文件 139 passed)

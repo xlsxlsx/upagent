@@ -16,7 +16,7 @@ from pathlib import Path
 
 from agent.communication.event import EventType
 from agent.core.agent import Agent
-from agent.core.loop import Action, Thought
+from agent.core.loop import Action, AgentLoop, Thought
 from agent.core.request import UserRequest
 from agent.core.state import PhaseStatus, ProjectState
 from agent.memory.store import MemoryStore
@@ -103,7 +103,8 @@ def test_rollback_targets_mapping() -> None:
 # --- Supervisor：任务失败自动回退 ---
 
 # AgentLoop.max_steps 默认值：整轮执行不收敛需要消耗完这个步数
-_STEPS_PER_RUN = 25
+# 与 AgentLoop 默认 max_steps 联动，避免默认步数变化导致本测试失真
+_STEPS_PER_RUN = AgentLoop.max_steps
 
 # AgentLoop.max_steps 默认值：整轮执行不收敛需要消耗完这个步数 = 25
 

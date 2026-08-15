@@ -113,7 +113,7 @@ def run_project(
     repo_map_provider: RepoMapProvider | None = None,
     events: EventBus | None = None,
     decompose_fn: Callable[..., TaskTree] = decompose,
-    max_steps: int = 15,
+    max_steps: int = 10,
 ) -> ProjectOutcome:
     """一站式流水线：用户输入 → 计划 → 执行 → 审查 → 交付结论。"""
     request = UserRequest(
@@ -169,7 +169,7 @@ def run_llm_project(
     use_llm_decompose: bool = True,
     repo_map_provider: RepoMapProvider | None = None,
     acceptance_fn: AcceptanceFn | None = None,
-    max_steps: int = 15,
+    max_steps: int = 10,
 ) -> ProjectOutcome:
     """LLM 版端到端入口：思考 / 决策 / 审查 / 拆解全部由 provider 驱动。
 

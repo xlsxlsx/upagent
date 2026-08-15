@@ -84,7 +84,7 @@ class Supervisor:
     max_retries: int = 2  # 单个任务的重试次数（首跑之外）
     max_tasks: int = 100  # 防失控：一次 run 最多处理的任务数
     max_rollbacks: int = 2  # 回退预算：超过即记 failure_memory 并停止
-    max_steps: int = 15  # 单任务循环步数上限（收敛控制，默认 15）
+    max_steps: int = 10  # 单任务循环步数上限（收敛控制，默认 10）
     # 计划-执行-审查 闭环
     review_fn: TaskReviewFn | None = None  # 每个任务完成后的审查门禁
     acceptance_fn: AcceptanceFn | None = None  # 全部完成后的终审验收
