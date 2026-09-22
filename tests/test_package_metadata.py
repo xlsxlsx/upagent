@@ -1,8 +1,11 @@
 import json
+import shutil
 import subprocess
 import tomllib
 from pathlib import Path
 from zipfile import ZipFile
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_NOTES_SOURCE_PATH = ROOT / "src" / "tau_coding" / "data" / "release-notes" / "releases.json"
@@ -33,6 +36,7 @@ def test_current_version_has_release_notes() -> None:
     assert any(entry["version"] == pyproject["project"]["version"] for entry in release_notes)
 
 
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not available on PATH")
 def test_wheel_includes_release_notes_package_data(tmp_path: Path) -> None:
     """Regression: releases.json must be included in installed wheels."""
     wheel_dir = tmp_path / "wheel"

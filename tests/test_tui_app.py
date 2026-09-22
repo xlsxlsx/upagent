@@ -179,7 +179,6 @@ class FakeSession:
             ProjectContextFile(path=str(self.cwd / "AGENTS.md"), content="Follow rules."),
         )
         self.context_token_estimate = 12034
-        self.auto_compact_token_threshold = 200000
         self.context_window_tokens = 216384
         self.thinking_level = "medium"
         self.available_thinking_levels = ("off", "minimal", "low", "medium", "high", "xhigh")
@@ -493,7 +492,6 @@ def test_session_sidebar_renders_session_metadata() -> None:
     assert "cumulative usage" in output
     assert "1.2m in, 48k out" in output
     assert "1.2m in, 48k out · ~$1.24" in output
-    assert "auto at 200k" in output
     assert "read, write, edit, bash" in output
     assert "• review" in output
     assert "permission-gate, subagents" in output
@@ -680,11 +678,19 @@ def test_session_sidebar_lists_multiple_context_files() -> None:
 
     output = console.export_text()
     assert "AGENTS.md" in output
-    assert ".agents/AGENTS.md" in output
-    assert "docs/AGENTS.md" in output
-    assert "~/.agents/AGENTS.md" in output
+    agents_label = str(
+        (session.cwd / ".agents" / "AGENTS.md").resolve().relative_to(
+            session.cwd.resolve()
+        )
+    )
+    assert agents_label in output
+    docs_label = str(
+        (session.cwd / "docs/AGENTS.md").resolve().relative_to(session.cwd.resolve())
+    )
+    assert docs_label in output
+    assert f"~/{Path('.agents') / 'AGENTS.md'}" in output
     assert str(Path.home() / ".agents" / "AGENTS.md") not in output
-    assert "/Users/alex/.agents/AGENTS.md" in output
+    assert str(Path("/Users/alex/.agents/AGENTS.md").resolve()) in output
 
 
 def test_compact_session_info_renders_sidebar_facts() -> None:
@@ -695,9 +701,9 @@ def test_compact_session_info_renders_sidebar_facts() -> None:
     output = console.export_text()
     lines = output.splitlines()
     provider_line = next(index for index, line in enumerate(lines) if "openai:fake-model" in line)
-    context_line = next(index for index, line in enumerate(lines) if "12k/200k" in line)
-    assert "/workspace/project (--)" in output
-    assert "context 12k/200k" not in output
+    context_line = next(index for index, line in enumerate(lines) if "12k/216k" in line)
+    assert f"{Path('/workspace/project')} (--)" in output
+    assert "context 12k/216k" not in output
     assert "openai:fake-model" in lines[provider_line]
     assert "(medium)" in lines[provider_line]
     assert context_line == provider_line + 1
@@ -716,7 +722,7 @@ def test_compact_session_info_styles_provider_as_metadata() -> None:
 def test_compact_session_info_styles_parent_path_as_metadata() -> None:
     cwd = _styled_cwd(Path("/workspace/project"), theme=TAU_DARK_THEME)
 
-    assert cwd.plain == "/workspace/project (--)"
+    assert cwd.plain == f"{Path('/workspace/project')} (--)"
     assert str(cwd.spans[0].style) == TAU_DARK_THEME.completion_description
     assert str(cwd.spans[1].style) == TAU_DARK_THEME.prompt_text
     assert str(cwd.spans[2].style) == TAU_DARK_THEME.completion_description
@@ -3922,7 +3928,7 @@ async def test_tui_app_export_command_runs_session_export() -> None:
         await pilot.press("enter")
 
         assert session.export_calls == [(Path("out.jsonl"), "jsonl")]
-        assert notifications == ["Exported session to /workspace/project/session.html"]
+        assert notifications == [f"Exported session to {Path('/workspace/project/session.html')}"]
         assert session.prompt_texts == []
 
 
@@ -4506,7 +4512,7 @@ async def test_tui_app_completes_resume_session_argument() -> None:
 
         assert app._completion_state.selected is not None
         assert app._completion_state.selected.description == (
-            "Session - fake-model - /workspace/project"
+            f"Session - fake-model - {Path('/workspace/project')}"
         )
 
         await pilot.press("tab")
@@ -6260,18 +6266,40 @@ async def test_tui_login_api_key_opens_api_provider_picker() -> None:
         assert isinstance(app.screen, LoginMethodPickerScreen)
         app.screen.action_cursor_down()
         app.screen.action_select_cursor()
-        await pilot.pause()
 
+        for _ in range(50):
+            await pilot.pause()
+            if isinstance(app.screen, LoginProviderPickerScreen):
+                break
         assert isinstance(app.screen, LoginProviderPickerScreen)
-        provider_list = app.screen.query_one("#login-provider-list", ListView)
-        labels = [str(item.query_one(Label).render()) for item in provider_list.children]
+        for _ in range(50):
+            try:
+                provider_list = app.screen.query_one("#login-provider-list", ListView)
+                break
+            except Exception:
+                await pilot.pause()
+        else:
+            provider_list = app.screen.query_one("#login-provider-list", ListView)
+        for _ in range(50):
+            try:
+                labels = [str(item.query_one(Label).render()) for item in provider_list.children]
+                if labels:
+                    break
+            except Exception:
+                pass
+            await pilot.pause()
+        else:
+            labels = [str(item.query_one(Label).render()) for item in provider_list.children]
         assert labels[0] == "OpenAI — openai"
         assert "OpenAI Codex subscription — openai-codex" not in labels
 
         await pilot.press("down")
         await pilot.press("enter")
-        await pilot.pause()
 
+        for _ in range(50):
+            await pilot.pause()
+            if isinstance(app.screen, LoginScreen):
+                break
         assert isinstance(app.screen, LoginScreen)
         assert app.screen.provider.name == "anthropic"
 
@@ -7812,7 +7840,6 @@ async def test_run_tui_app_creates_new_session_by_default(
         @classmethod
         async def load(cls, config: object) -> str:
             assert config.provider_name == "local"  # type: ignore[attr-defined]
-            assert config.auto_compact_token_threshold == 1000  # type: ignore[attr-defined]
             assert config.index_on_first_persist is True  # type: ignore[attr-defined]
             calls.append("load")
             return "session"
@@ -7852,7 +7879,6 @@ async def test_run_tui_app_creates_new_session_by_default(
         model=None,
         cwd=tmp_path,
         provider_name="local",
-        auto_compact_token_threshold=1000,
         initial_prompt="explain this repo",
         session_manager=FakeManager(),
     )

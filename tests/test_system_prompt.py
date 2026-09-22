@@ -1,3 +1,4 @@
+import os
 from datetime import date
 from pathlib import Path
 
@@ -45,7 +46,8 @@ def test_default_prompt_includes_tools_guidelines_date_and_cwd(tmp_path: Path) -
     assert "Tau documentation (read only when the user asks about Tau itself" in prompt
     assert "custom providers or adding built-in providers/models (docs/models.md)" in prompt
     assert "creating or modifying extensions (docs/extensions.md" in prompt
-    assert prompt.endswith(f"Current date: 2026-06-17\nCurrent working directory: {tmp_path}")
+    cwd_text = str(tmp_path).replace(os.sep, "/") if os.name == "nt" else str(tmp_path)
+    assert prompt.endswith(f"Current date: 2026-06-17\nCurrent working directory: {cwd_text}")
 
 
 def test_tool_without_prompt_snippet_is_hidden_from_available_tools() -> None:

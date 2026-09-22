@@ -74,9 +74,13 @@ class AgentCallDiagnosticLogger:
         return self.path
 
     def _append(self, entry: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a", encoding="utf-8") as file:
-            file.write(json.dumps(entry, sort_keys=True) + "\n")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            with self.path.open("a", encoding="utf-8") as file:
+                file.write(json.dumps(entry, sort_keys=True) + "\n")
+        except OSError:
+            # Diagnostic logging is best-effort; never fail the session.
+            return
 
 
 def new_agent_call_run_id() -> str:

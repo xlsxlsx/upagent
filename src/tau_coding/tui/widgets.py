@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -80,9 +81,6 @@ class SessionSummarySource(Protocol):
     def context_token_estimate(self) -> int: ...
 
     @property
-    def auto_compact_token_threshold(self) -> int | None: ...
-
-    @property
     def context_window_tokens(self) -> int: ...
 
     @property
@@ -159,7 +157,6 @@ def _session_summary_fingerprint(
         session.model,
         session.thinking_level,
         session.context_token_estimate,
-        session.auto_compact_token_threshold,
         session.context_window_tokens,
         session.session_title,
         session.session_stats,
@@ -1500,11 +1497,6 @@ def render_session_sidebar(
     else:
         usage.append(f"~{_format_cost(stats.estimated_cost)}")
 
-    threshold = session.auto_compact_token_threshold
-    compaction = Text(
-        "off" if threshold is None else f"auto at {_compact_token_count(threshold)}",
-        style=theme.completion_description,
-    )
     tools = _comma_list([tool.name for tool in session.tools], empty="No tools", theme=theme)
     skills = _limited_bullet_list(
         [skill.name for skill in session.skills],
@@ -1530,7 +1522,6 @@ def render_session_sidebar(
         Padding(title, (0, 0, 0, 1)),
         _sidebar_section("activity", activity, theme=theme),
         _sidebar_section("cumulative usage", usage, theme=theme),
-        _sidebar_section("compaction", compaction, theme=theme),
         _sidebar_section("context", context, theme=theme),
         _sidebar_section("tools", tools, theme=theme),
         _sidebar_section("skills", skills, theme=theme),
@@ -1992,15 +1983,18 @@ def _plain_text(text: str, *, body_style: str) -> Text:
 
 
 def _context_usage(session: SessionSummarySource) -> str:
-    threshold = session.auto_compact_token_threshold
-    limit = session.context_window_tokens if threshold is None or threshold <= 0 else threshold
-    return f"{_compact_token_count(session.context_token_estimate)}/{_compact_token_count(limit)}"
+    return (
+        f"{_compact_token_count(session.context_token_estimate)}"
+        f"/{_compact_token_count(session.context_window_tokens)}"
+    )
 
 
 def _styled_cwd(cwd: Path, *, theme: TuiTheme) -> Text:
     """Style the parent path as metadata while emphasizing the working directory."""
     short_path = _short_path(cwd)
     parent, separator, name = short_path.rpartition("/")
+    if not separator and os.sep == "\\":
+        parent, separator, name = short_path.rpartition("\\")
     text = Text(overflow="fold", no_wrap=False)
     if separator and name:
         text.append(f"{parent}{separator}", style=theme.completion_description)

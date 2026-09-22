@@ -11,6 +11,11 @@ from pydantic import BaseModel, ConfigDict
 
 from tau_coding.paths import TauPaths
 
+# Minimum separation between consecutive in-process timestamps. Windows
+# wall-clock resolution can be coarse (~15ms), so successive session updates
+# would otherwise tie and lose their ordering in stable sorts.
+_TIMESTAMP_STEP = 1e-6
+
 
 class SessionRecordModel(BaseModel):
     """JSON-serializable coding-session metadata."""
@@ -73,6 +78,7 @@ class SessionManager:
 
     def __init__(self, paths: TauPaths | None = None) -> None:
         self.paths = paths or TauPaths()
+        self._last_timestamp = 0.0
 
     @property
     def index_path(self) -> Path:
@@ -135,7 +141,7 @@ class SessionManager:
         session_id: str | None = None,
     ) -> CodingSessionRecord:
         """Return metadata for a session without adding it to the resume index."""
-        now = time()
+        now = self._next_timestamp()
         resolved_cwd = cwd.resolve()
         record_id = session_id or uuid4().hex
         path = self.paths.project_session_dir(resolved_cwd) / f"{record_id}.jsonl"
@@ -150,6 +156,20 @@ class SessionManager:
             created_at=now,
             updated_at=now,
         )
+
+    def _next_timestamp(self) -> float:
+        """Return a strictly increasing in-process wall-clock timestamp.
+
+        Coarse OS clock resolution can make back-to-back updates return the
+        same value, which breaks newest-first ordering. A small local
+        watermark keeps successive updates strictly ordered; ordering across
+        processes still follows the wall clock.
+        """
+        now = time()
+        if now <= self._last_timestamp:
+            now = self._last_timestamp + _TIMESTAMP_STEP
+        self._last_timestamp = now
+        return now
 
     def index_session(self, record: CodingSessionRecord) -> CodingSessionRecord:
         """Add a prepared session record to the resume index."""
@@ -167,7 +187,7 @@ class SessionManager:
         if existing is not None:
             return existing
 
-        now = time()
+        now = self._next_timestamp()
         path = self.paths.default_session_path(resolved_cwd)
         record = CodingSessionRecord(
             id=session_id,
@@ -202,7 +222,7 @@ class SessionManager:
             provider_name=provider_name if provider_name is not None else existing.provider_name,
             title=title if title is not None else existing.title,
             created_at=existing.created_at,
-            updated_at=time(),
+            updated_at=self._next_timestamp(),
         )
         self._upsert(updated)
         return updated

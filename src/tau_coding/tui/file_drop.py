@@ -21,6 +21,7 @@ quoting any path that contains whitespace.
 
 from __future__ import annotations
 
+import os
 import shlex
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -46,7 +47,11 @@ def normalize_dropped_paths(text: str) -> str | None:
         return _quote_path(whole)
 
     try:
-        tokens = shlex.split(stripped, posix=True)
+        tokens = (
+            _split_windows_tokens(stripped)
+            if os.name == "nt"
+            else shlex.split(stripped, posix=True)
+        )
     except ValueError:
         return None
     if not tokens:
@@ -61,23 +66,63 @@ def normalize_dropped_paths(text: str) -> str | None:
     return " ".join(_quote_path(path) for path in paths)
 
 
+def _split_windows_tokens(text: str) -> list[str]:
+    """Split Windows drop text without eating drive/path backslashes.
+
+    Honors double quotes and the terminal convention of escaping spaces as
+    backslash-space; any other character (including ``\\``) is literal.
+    Raises ``ValueError`` on unbalanced quotes.
+    """
+    tokens: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "\\" and index + 1 < len(text) and text[index + 1] == " ":
+            current.append(" ")
+            index += 2
+            continue
+        if char == '"':
+            in_quotes = not in_quotes
+            index += 1
+            continue
+        if char.isspace() and not in_quotes:
+            if current:
+                tokens.append("".join(current))
+                current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    if in_quotes:
+        raise ValueError("No closing quotation")
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
 def _token_to_path(token: str) -> str | None:
     """Resolve one dropped token to an existing absolute path, if possible."""
     candidate = token
     if candidate.startswith("file://"):
-        parsed = urlparse(candidate)
-        if parsed.netloc not in ("", "localhost"):
-            return None
-        candidate = unquote(parsed.path)
+        if os.name == "nt":
+            # Windows terminals emit file://D:/path or file:///D:/path URIs.
+            candidate = unquote(candidate[len("file://") :].lstrip("/"))
+        else:
+            parsed = urlparse(candidate)
+            if parsed.netloc not in ("", "localhost"):
+                return None
+            candidate = unquote(parsed.path)
     path = Path(candidate)
     if not path.is_absolute() or not path.exists():
         return None
-    return candidate
+    return str(path)
 
 
 def _quote_path(path: str) -> str:
     """Quote *path* with double quotes when it contains whitespace."""
     if not any(char.isspace() for char in path):
         return path
-    escaped = path.replace("\\", "\\\\").replace('"', '\\"')
+    escaped = path.replace('"', '\\"')
     return f'"{escaped}"'

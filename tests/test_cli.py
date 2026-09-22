@@ -13,6 +13,7 @@ from tau_ai import (
 )
 from tau_coding import CodingSessionRecord, SessionManager, cli
 from tau_coding.cli import app, run_print_mode
+from tau_coding.context import discover_project_context
 from tau_coding.paths import TauPaths
 from tau_coding.provider_config import (
     OpenAICompatibleProviderConfig,
@@ -229,7 +230,7 @@ def test_utility_command_does_not_check_for_updates(monkeypatch: pytest.MonkeyPa
 def test_cli_without_prompt_invokes_tui_runner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    calls: list[tuple[str | None, Path, str | None, bool, str | None, int | None, str | None]] = []
+    calls: list[tuple[str | None, Path, str | None, bool, str | None, str | None]] = []
 
     async def fake_run_openai_tui(
         model: str | None,
@@ -237,7 +238,6 @@ def test_cli_without_prompt_invokes_tui_runner(
         session_id: str | None,
         new_session: bool,
         provider_name: str | None,
-        auto_compact_token_threshold: int | None,
         initial_prompt: str | None,
         update_notice: object | None = None,
         *extra: object,
@@ -250,7 +250,6 @@ def test_cli_without_prompt_invokes_tui_runner(
                 session_id,
                 new_session,
                 provider_name,
-                auto_compact_token_threshold,
                 initial_prompt,
             )
         )
@@ -262,7 +261,7 @@ def test_cli_without_prompt_invokes_tui_runner(
     result = CliRunner().invoke(app, [])
 
     assert result.exit_code == 0
-    assert calls == [(None, tmp_path, None, False, None, None, None)]
+    assert calls == [(None, tmp_path, None, False, None, None)]
 
 
 def test_cli_prints_resume_hint_after_tui_exit(
@@ -301,7 +300,7 @@ def test_cli_suppresses_resume_hint_without_persisted_session(
 def test_cli_positional_prompt_invokes_tui_runner(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    calls: list[tuple[str | None, Path, str | None, bool, str | None, int | None, str | None]] = []
+    calls: list[tuple[str | None, Path, str | None, bool, str | None, str | None]] = []
 
     async def fake_run_openai_tui(
         model: str | None,
@@ -309,7 +308,6 @@ def test_cli_positional_prompt_invokes_tui_runner(
         session_id: str | None,
         new_session: bool,
         provider_name: str | None,
-        auto_compact_token_threshold: int | None,
         initial_prompt: str | None,
         update_notice: object | None = None,
         *extra: object,
@@ -322,7 +320,6 @@ def test_cli_positional_prompt_invokes_tui_runner(
                 session_id,
                 new_session,
                 provider_name,
-                auto_compact_token_threshold,
                 initial_prompt,
             )
         )
@@ -334,7 +331,7 @@ def test_cli_positional_prompt_invokes_tui_runner(
     result = CliRunner().invoke(app, ["explain this repo"])
 
     assert result.exit_code == 0
-    assert calls == [(None, tmp_path, None, False, None, None, "explain this repo")]
+    assert calls == [(None, tmp_path, None, False, None, "explain this repo")]
 
 
 @pytest.mark.anyio
@@ -408,12 +405,13 @@ async def test_run_print_mode_prints_final_assistant_text(
     assert captured.out == "Hello\n"
     assert captured.err == ""
     assert provider.calls[0][0] == "fake"
-    resource_paths = TauResourcePaths(root=tmp_path / "resources", agents_root=None)
+    resource_paths = TauResourcePaths(root=tmp_path / "resources", agents_root=None, cwd=tmp_path)
     assert provider.calls[0][1] == build_system_prompt(
         BuildSystemPromptOptions(
             cwd=tmp_path,
             tools=create_coding_tools(cwd=tmp_path),
             skills=load_skills(resource_paths),
+            context_files=discover_project_context(resource_paths),
         )
     )
     assert [tool.name for tool in provider.calls[0][3]] == ["read", "write", "edit", "bash"]
@@ -436,11 +434,13 @@ async def test_run_print_mode_system_command_prints_prompt_without_provider_call
     )
 
     captured = capsys.readouterr()
+    resource_paths = TauResourcePaths(root=tmp_path / "resources", agents_root=None, cwd=tmp_path)
     expected_system = build_system_prompt(
         BuildSystemPromptOptions(
             cwd=tmp_path,
             tools=create_coding_tools(cwd=tmp_path),
-            skills=load_skills(TauResourcePaths(root=tmp_path / "resources", agents_root=None)),
+            skills=load_skills(resource_paths),
+            context_files=discover_project_context(resource_paths),
         )
     )
     assert ok is True
@@ -700,7 +700,7 @@ def test_cli_exits_nonzero_when_print_mode_fails(monkeypatch: pytest.MonkeyPatch
 def test_default_tui_invokes_tui_runner_with_flags(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    calls: list[tuple[str | None, Path, str | None, bool, str | None, int | None, str | None]] = []
+    calls: list[tuple[str | None, Path, str | None, bool, str | None, str | None]] = []
 
     async def fake_run_openai_tui(
         model: str | None,
@@ -708,7 +708,6 @@ def test_default_tui_invokes_tui_runner_with_flags(
         session_id: str | None,
         new_session: bool,
         provider_name: str | None,
-        auto_compact_token_threshold: int | None,
         initial_prompt: str | None,
         update_notice: object | None = None,
         *extra: object,
@@ -721,7 +720,6 @@ def test_default_tui_invokes_tui_runner_with_flags(
                 session_id,
                 new_session,
                 provider_name,
-                auto_compact_token_threshold,
                 initial_prompt,
             )
         )
@@ -740,13 +738,11 @@ def test_default_tui_invokes_tui_runner_with_flags(
             "local",
             "--session",
             "session-1",
-            "--auto-compact-threshold",
-            "1000",
         ],
     )
 
     assert result.exit_code == 0
-    assert calls == [("fake", tmp_path, "session-1", False, "local", 1000, None)]
+    assert calls == [("fake", tmp_path, "session-1", False, "local", None)]
 
 
 def test_default_tui_rejects_session_with_new_session(tmp_path: Path) -> None:

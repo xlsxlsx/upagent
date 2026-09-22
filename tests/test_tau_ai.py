@@ -804,7 +804,6 @@ async def test_openai_codex_provider_discovers_and_caches_live_model_limits() ->
                         "context_window": 372_000,
                         "max_context_window": 372_000,
                         "effective_context_window_percent": 95,
-                        "auto_compact_token_limit": 330_000,
                         "max_output_tokens": 128_000,
                     },
                     {"slug": "invalid", "context_window": -1},
@@ -829,7 +828,6 @@ async def test_openai_codex_provider_discovers_and_caches_live_model_limits() ->
         context_window=372_000,
         max_output_tokens=128_000,
         effective_context_window_percent=95,
-        auto_compact_token_limit=330_000,
     )
     assert cached == limits
     assert len(requests) == 1

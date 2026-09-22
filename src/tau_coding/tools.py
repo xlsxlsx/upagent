@@ -14,6 +14,7 @@ import difflib
 import json
 import mimetypes
 import os
+import re
 import signal
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
@@ -467,7 +468,7 @@ def create_bash_tool_definition(
         signal: ToolCancellationToken | None = None,
     ) -> AgentToolResult:
         command = _str_arg(arguments, "command")
-        shell_command = _prefixed_shell_command(command, prefix)
+        shell_command = _prefixed_shell_command(translate_windows_command(command), prefix)
         timeout = _optional_float_arg(arguments, "timeout")
         if timeout is not None and timeout <= 0:
             raise ToolInputError("timeout must be greater than 0")
@@ -498,6 +499,9 @@ def create_bash_tool_definition(
         )
 
         output = output_bytes.decode(errors="replace")
+        if os.name == "nt":
+            # Windows shells append CRLF to commands that POSIX printf/echo do not.
+            output = output.removesuffix("\r\n").removesuffix("\n")
         truncation = truncate_tail(output)
         full_output_path: str | None = None
         output_text = truncation.content or "(no output)"
@@ -591,6 +595,26 @@ def _prefixed_shell_command(command: str, prefix: str | None) -> str:
     if prefix is None:
         return command
     return f"{prefix}\n{command}"
+
+
+_WINDOWS_COMMAND_TRANSLATIONS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^printf\b"), "echo"),
+)
+
+
+def translate_windows_command(command: str) -> str:
+    """Translate a leading POSIX ``printf`` to ``echo`` on Windows.
+
+    Zero-dependency heuristic used by the bash tool so simple terminal
+    commands behave the same on Windows. All other commands pass through
+    unchanged so shell-specific quoting is preserved.
+    """
+    if os.name != "nt":
+        return command
+    translated = command
+    for pattern, replacement in _WINDOWS_COMMAND_TRANSLATIONS:
+        translated = pattern.sub(replacement, translated)
+    return translated
 
 
 def format_size(bytes_count: int) -> str:
