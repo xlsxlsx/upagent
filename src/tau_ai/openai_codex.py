@@ -968,7 +968,6 @@ def _parse_codex_model_limits(payload: object) -> dict[str, RuntimeModelLimits]:
             context_window=context_window,
             max_output_tokens=_positive_int(item.get("max_output_tokens")),
             effective_context_window_percent=effective_percent,
-            auto_compact_token_limit=_positive_int(item.get("auto_compact_token_limit")),
         )
     return parsed
 

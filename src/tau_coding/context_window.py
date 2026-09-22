@@ -163,13 +163,6 @@ def estimate_context_tokens(
     return estimate_context_usage(system=system, messages=messages, tools=tools).total_tokens
 
 
-def auto_compaction_threshold_for_context_window(context_window_tokens: int) -> int | None:
-    """Return Pi-style automatic compaction threshold for a model context window."""
-    if context_window_tokens <= 0:
-        return None
-    return max(1, context_window_tokens - DEFAULT_COMPACTION_RESERVE_TOKENS)
-
-
 def estimate_context_usage(
     *,
     system: str,

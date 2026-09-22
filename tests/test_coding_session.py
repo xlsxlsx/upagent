@@ -54,10 +54,22 @@ from tau_coding import session as coding_session_module
 from tau_coding.events import QueueUpdateEvent
 from tau_coding.prompt_templates import PromptTemplate
 from tau_coding.session import _ordered_tree_entries, parse_terminal_command
+from tau_coding.system_prompt import ProjectContextFile
 
 
 async def _collect_session_events(session_stream: object) -> list[object]:
     return [event async for event in session_stream]  # type: ignore[attr-defined]
+
+
+def _project_context_files_under(
+    session: CodingSession, root: Path
+) -> list[ProjectContextFile]:
+    root_resolved = root.resolve()
+    return [
+        context_file
+        for context_file in session.context_files
+        if Path(context_file.path).resolve().is_relative_to(root_resolved)
+    ]
 
 
 def _assert_messages(actual: object, expected: object) -> None:
@@ -1096,8 +1108,9 @@ async def test_resumed_session_history_overrides_saved_thinking_preference(
 
 @pytest.mark.anyio
 async def test_session_uses_codex_subscription_thinking_capabilities(
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    isolate_home(monkeypatch, tmp_path)
     provider_config = OpenAICodexProviderConfig(
         thinking_levels=("off", "minimal", "low", "medium", "high", "xhigh"),
         thinking_models=("gpt-5.5",),
@@ -1821,7 +1834,10 @@ async def test_session_builds_system_prompt_when_system_is_omitted(tmp_path: Pat
     assert "Follow project rules." in provider.calls[0][1]
     assert "<available_skills>" in provider.calls[0][1]
     assert "<name>testing</name>" in provider.calls[0][1]
-    assert [Path(context_file.path).name for context_file in session.context_files] == ["AGENTS.md"]
+    assert [
+        Path(context_file.path).name
+        for context_file in _project_context_files_under(session, tmp_path)
+    ] == ["AGENTS.md"]
 
 
 @pytest.mark.anyio
@@ -2175,7 +2191,10 @@ async def test_session_skills_disabled_suppresses_skill_index(tmp_path: Path) ->
     assert "<available_skills>" not in provider.calls[0][1]
     # Project context (AGENTS.md) remains unaffected by disabling skills.
     assert "Follow project rules." in provider.calls[0][1]
-    assert [Path(context_file.path).name for context_file in session.context_files] == ["AGENTS.md"]
+    assert [
+        Path(context_file.path).name
+        for context_file in _project_context_files_under(session, tmp_path)
+    ] == ["AGENTS.md"]
     # /skill: commands have nothing to expand against.
     with pytest.raises(ResourceError):
         session.expand_prompt_text("/skill:testing")
@@ -2439,7 +2458,7 @@ async def test_session_reload_refreshes_resources_and_system_prompt(tmp_path: Pa
         )
     )
     assert session.skills == ()
-    assert session.context_files == ()
+    assert _project_context_files_under(session, tmp_path) == []
 
     skills_dir = resource_root / "skills" / "testing"
     skills_dir.mkdir(parents=True)
@@ -2457,11 +2476,14 @@ async def test_session_reload_refreshes_resources_and_system_prompt(tmp_path: Pa
     _events = await _collect_session_events(session.prompt("Hello"))
 
     assert summary.skills.after == 1
-    assert summary.context_files.after == 1
+    assert summary.context_files.after == summary.context_files.before + 1
     assert summary.system_prompt_rebuilt is True
     assert entries_after == entries_before
     assert {skill.name for skill in session.skills} == {"testing"}
-    assert [Path(context_file.path).name for context_file in session.context_files] == ["AGENTS.md"]
+    assert [
+        Path(context_file.path).name
+        for context_file in _project_context_files_under(session, tmp_path)
+    ] == ["AGENTS.md"]
     assert "Reloaded project rules." in provider.calls[0][1]
     assert "<name>testing</name>" in provider.calls[0][1]
 
@@ -2613,166 +2635,10 @@ async def test_session_compact_persists_summary_and_rebuilds_context(tmp_path: P
 
 
 @pytest.mark.anyio
-async def test_session_auto_compacts_after_response_when_threshold_is_exceeded(
-    tmp_path: Path,
-) -> None:
-    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
-    large_prompt = "Explain sessions.\n" + ("old context " * 12_000)
-    provider = FakeProvider(
-        [
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="First answer")),
-            ],
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="Second answer")),
-            ],
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="Generated automatic summary")),
-            ],
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="Third answer")),
-            ],
-        ]
-    )
-    session = await CodingSession.load(
-        CodingSessionConfig(
-            provider=provider,
-            model="fake",
-            system="You are Tau.",
-            storage=storage,
-            cwd=tmp_path,
-            auto_compact_token_threshold=1,
-        )
-    )
-    _first_events = await _collect_session_events(session.prompt(large_prompt))
-
-    _second_events = await _collect_session_events(session.prompt("Continue."))
-    _third_events = await _collect_session_events(session.prompt("Next."))
-
-    entries = await storage.read_all()
-    compactions = [entry for entry in entries if entry.type == "compaction"]
-
-    assert len(compactions) == 1
-    assert compactions[0].summary == "Generated automatic summary"
-    assert "Explain sessions." in provider.calls[2][2][0].content
-    _assert_messages(
-        provider.calls[3][2],
-        [
-            UserMessage(content=f"Previous conversation summary:\n{compactions[0].summary}"),
-            UserMessage(content="Continue."),
-            AssistantMessage(content="Second answer"),
-            UserMessage(content="Next."),
-        ],
-    )
-
-
-@pytest.mark.anyio
-async def test_session_auto_compacts_with_pi_style_default_threshold(
-    tmp_path: Path,
-) -> None:
-    storage = JsonlSessionStorage(tmp_path / "session.jsonl")
-    large_prompt = "Explain sessions.\n" + ("old context " * 12_000)
-    provider = FakeProvider(
-        [
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="First answer")),
-            ],
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="Second answer")),
-            ],
-            [
-                assistant_start(model="fake"),
-                assistant_done(message=AssistantMessage(content="Default threshold summary")),
-            ],
-        ]
-    )
-    settings = ProviderSettings(
-        default_provider="local",
-        providers=(
-            OpenAICompatibleProviderConfig(
-                name="local",
-                models=("fake",),
-                default_model="fake",
-                context_windows={"fake": 20_000},
-            ),
-        ),
-    )
-    session = await CodingSession.load(
-        CodingSessionConfig(
-            provider=provider,
-            model="fake",
-            system="You are Tau.",
-            storage=storage,
-            cwd=tmp_path,
-            provider_name="local",
-            provider_settings=settings,
-        )
-    )
-
-    assert session.context_window_tokens == 20_000
-    assert session.auto_compact_token_threshold == 3_616
-
-    _first_events = await _collect_session_events(session.prompt(large_prompt))
-    _second_events = await _collect_session_events(session.prompt("Continue."))
-
-    compactions = [entry for entry in await storage.read_all() if entry.type == "compaction"]
-
-    assert len(compactions) == 1
-    assert compactions[0].summary == "Default threshold summary"
-
-
-@pytest.mark.anyio
-async def test_session_uses_live_provider_limits_for_compaction_threshold(
-    tmp_path: Path,
-) -> None:
-    provider = ModelLimitsFakeProvider(
-        [],
-        limits=RuntimeModelLimits(
-            context_window=372_000,
-            max_output_tokens=128_000,
-            effective_context_window_percent=95,
-        ),
-    )
-    settings = ProviderSettings(
-        default_provider="openai-codex",
-        providers=(
-            OpenAICodexProviderConfig(
-                models=("gpt-5.6-sol",),
-                default_model="gpt-5.6-sol",
-                context_windows={"gpt-5.6-sol": 272_000},
-            ),
-        ),
-    )
-
-    session = await CodingSession.load(
-        CodingSessionConfig(
-            provider=provider,
-            model="gpt-5.6-sol",
-            system="You are Tau.",
-            storage=JsonlSessionStorage(tmp_path / "session.jsonl"),
-            cwd=tmp_path,
-            provider_name="openai-codex",
-            provider_settings=settings,
-        )
-    )
-
-    assert provider.discovery_calls == ["gpt-5.6-sol"]
-    assert session.context_window_tokens == 372_000
-    assert session.auto_compact_token_threshold == 334_800
-    assert session.context_window_source == "provider live catalog"
-    assert session.model_limits_discovery_error is None
-
-
-@pytest.mark.anyio
 async def test_session_falls_back_when_live_model_limit_discovery_fails(
-    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    isolate_home(monkeypatch, tmp_path)
     provider = ModelLimitsFakeProvider([], error=RuntimeError("catalog unavailable"))
     settings = ProviderSettings(
         default_provider="openai-codex",
@@ -2798,7 +2664,6 @@ async def test_session_falls_back_when_live_model_limit_discovery_fails(
     )
 
     assert session.context_window_tokens == 272_000
-    assert session.auto_compact_token_threshold == 255_616
     assert session.context_window_source == "configured catalog"
     assert session.model_limits_discovery_error == "RuntimeError: catalog unavailable"
 

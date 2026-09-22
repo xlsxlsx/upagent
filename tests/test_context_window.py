@@ -4,7 +4,6 @@ from tau_agent import AssistantMessage, TextContent, ToolCall, ToolResultMessage
 from tau_agent.messages import assistant_content
 from tau_coding.context_window import (
     ContextUsageEstimate,
-    auto_compaction_threshold_for_context_window,
     build_compaction_summary_prompt,
     estimate_context_tokens,
     estimate_context_usage,
@@ -51,12 +50,6 @@ def test_context_token_estimate_includes_system_messages_and_tools(tmp_path: Pat
     )
 
     assert estimate > estimate_text_tokens("You are Tau.hellohi")
-
-
-def test_auto_compaction_threshold_keeps_pi_style_reserve() -> None:
-    assert auto_compaction_threshold_for_context_window(128_000) == 111_616
-    assert auto_compaction_threshold_for_context_window(16_384) == 1
-    assert auto_compaction_threshold_for_context_window(0) is None
 
 
 def test_context_usage_estimate_reports_breakdown(tmp_path: Path) -> None:

@@ -230,13 +230,6 @@ def main(
         bool,
         typer.Option("--new-session", help="Create a new session in TUI mode (default)."),
     ] = False,
-    auto_compact_threshold: Annotated[
-        int | None,
-        typer.Option(
-            "--auto-compact-threshold",
-            help="Automatically compact TUI context above this rough token estimate.",
-        ),
-    ] = None,
     extension: Annotated[
         list[Path] | None,
         typer.Option(
@@ -364,7 +357,6 @@ def main(
                 session,
                 new_session,
                 provider,
-                auto_compact_threshold,
                 initial_prompt,
                 notice,
                 extension_paths,
@@ -413,7 +405,6 @@ async def run_openai_tui(
     session_id: str | None = None,
     new_session: bool = False,
     provider_name: str | None = None,
-    auto_compact_token_threshold: int | None = None,
     initial_prompt: str | None = None,
     update_notice: UpdateNotice | None = None,
     extension_paths: tuple[Path, ...] = (),
@@ -429,7 +420,6 @@ async def run_openai_tui(
         session_id=session_id,
         new_session=new_session,
         provider_name=provider_name,
-        auto_compact_token_threshold=auto_compact_token_threshold,
         initial_prompt=initial_prompt,
         startup_update_notice=update_notice.message if update_notice is not None else None,
         startup_notices=startup_notices,

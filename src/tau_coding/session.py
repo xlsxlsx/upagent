@@ -48,7 +48,6 @@ from tau_coding.context_window import (
     DEFAULT_CONTEXT_WINDOW_TOKENS,
     SUMMARIZATION_SYSTEM_PROMPT,
     ContextUsageEstimate,
-    auto_compaction_threshold_for_context_window,
     build_compaction_summary_prompt,
     estimate_context_usage,
     estimate_message_tokens,
@@ -213,8 +212,6 @@ class CodingSessionConfig:
     provider_name: str = "openai"
     provider_settings: ProviderSettings | None = None
     runtime_provider_config: ProviderConfig | None = None
-    auto_compact_token_threshold: int | None = None
-    auto_compact_enabled: bool = True
     thinking_level: ThinkingLevel = DEFAULT_THINKING_LEVEL
     index_on_first_persist: bool = False
     shell_command_prefix: str | None = None
@@ -276,8 +273,6 @@ class CodingSession:
         self._provider_settings = config.provider_settings
         self._runtime_provider_config = config.runtime_provider_config
         self._resource_paths = resource_paths_with_cwd(config.resource_paths, config.cwd)
-        self._auto_compact_token_threshold = config.auto_compact_token_threshold
-        self._auto_compact_enabled = config.auto_compact_enabled
         self._thinking_level = _state_thinking_level(
             state,
             default=_default_thinking_level_for_active_model(self),
@@ -657,19 +652,6 @@ class CodingSession:
     def system_prompt(self) -> str:
         """Return the effective system prompt sent to the model."""
         return self._harness.config.system
-
-    @property
-    def auto_compact_token_threshold(self) -> int | None:
-        """Return the effective automatic compaction threshold, if any."""
-        if not self._auto_compact_enabled:
-            return None
-        if self._auto_compact_token_threshold is not None:
-            return self._auto_compact_token_threshold
-        if self._runtime_model_limits_key == (self.provider_name, self.model):
-            limits = self._runtime_model_limits
-            if limits is not None:
-                return limits.effective_auto_compact_token_limit
-        return auto_compaction_threshold_for_context_window(self.context_window_tokens)
 
     @property
     def context_window_tokens(self) -> int:
@@ -1298,8 +1280,6 @@ class CodingSession:
                 provider_name=provider_name,
                 provider_settings=self._provider_settings,
                 runtime_provider_config=runtime_provider_config,
-                auto_compact_token_threshold=self._auto_compact_token_threshold,
-                auto_compact_enabled=self._auto_compact_enabled,
                 thinking_level=self._thinking_level,
                 shell_command_prefix=self._config.shell_command_prefix,
                 skills_enabled=self._config.skills_enabled,
@@ -1398,8 +1378,6 @@ class CodingSession:
         self._provider_settings = replacement._provider_settings
         self._runtime_provider_config = replacement._runtime_provider_config
         self._resource_paths = replacement._resource_paths
-        self._auto_compact_token_threshold = replacement._auto_compact_token_threshold
-        self._auto_compact_enabled = replacement._auto_compact_enabled
         self._thinking_level = replacement._thinking_level
         self._pending_initial_entries = replacement._pending_initial_entries
         self._extension_runtime = replacement._extension_runtime
@@ -1495,7 +1473,7 @@ class CodingSession:
 
         return TerminalCommandResult(
             command=normalized_command,
-            output=result.text,
+            output=result.text.rstrip("\r\n"),
             exit_code=exit_code,
             ok=exit_code == 0,
             added_to_context=add_to_context,
@@ -1557,7 +1535,6 @@ class CodingSession:
             )
 
         await self._refresh_runtime_model_limits()
-        await self._try_auto_compact(context=context, phase="auto_compact_before_prompt")
         persisted_count = len(self._harness.messages)
         auto_name_attempted = False
         overflow_message: AssistantMessage | None = None
@@ -1664,7 +1641,6 @@ class CodingSession:
                 await self._extension_runtime.emit_event(session_event_5)
                 yield session_event_5
                 return
-            await self._try_auto_compact(context=context, phase="auto_compact_after_prompt")
             session_event_5 = AgentSettledEvent()
             await self._extension_runtime.emit_event(session_event_5)
             yield session_event_5
@@ -1704,7 +1680,6 @@ class CodingSession:
                 else:
                     yield event
             await self._persist_messages_since(persisted_count)
-            await self._try_auto_compact(context=context, phase="auto_compact_after_continue")
             session_event_5 = AgentSettledEvent()
             await self._extension_runtime.emit_event(session_event_5)
             yield session_event_5
@@ -1839,22 +1814,6 @@ class CodingSession:
             session_id=self._config.session_id,
         )
 
-    async def _try_auto_compact(
-        self,
-        *,
-        context: AgentCallDiagnosticContext,
-        phase: str,
-    ) -> bool:
-        try:
-            return await self._maybe_auto_compact()
-        except Exception as exc:  # noqa: BLE001 - automatic compaction must not lose a turn
-            self._last_diagnostic_log_path = self._diagnostic_logger.log_exception(
-                context=context,
-                phase=phase,
-                exc=exc,
-            )
-            return False
-
     async def _try_overflow_compact(
         self,
         *,
@@ -1957,21 +1916,6 @@ class CodingSession:
             for provider in self._provider_settings.providers
             if self._provider_is_usable(provider)
         )
-
-    async def _maybe_auto_compact(self) -> bool:
-        threshold = self.auto_compact_token_threshold
-        if threshold is None or threshold <= 0:
-            return False
-        if len(self._state.context_entry_ids) < 2:
-            return False
-        if self.context_token_estimate <= threshold:
-            return False
-        plan = self._recent_preserving_compaction_plan()
-        if plan is None:
-            return False
-        summary = await self._generate_compaction_summary(plan.messages_to_summarize)
-        await self._append_compaction(summary, replace_entry_ids=plan.replace_entry_ids)
-        return True
 
     async def _generate_compaction_summary(
         self,

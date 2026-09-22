@@ -57,9 +57,6 @@ class CommandSession(Protocol):
     def context_token_estimate(self) -> int: ...
 
     @property
-    def auto_compact_token_threshold(self) -> int | None: ...
-
-    @property
     def context_window_tokens(self) -> int: ...
 
     @property
@@ -447,8 +444,6 @@ def _status_command(context: CommandContext) -> CommandResult:
         )
     lines.extend(_thinking_status_lines(session))
     lines.append(f"Resource diagnostics: {len(session.resource_diagnostics)}")
-    if session.auto_compact_token_threshold is not None:
-        lines.append(f"Auto compact threshold: {session.auto_compact_token_threshold}")
     if session.session_id is not None:
         lines.append(f"Session: {session.session_id}")
     if session.session_title:
