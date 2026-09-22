@@ -20,6 +20,7 @@ from agent.core.agent import Agent
 from agent.core.loop import Action, AgentLoop
 from agent.core.request import UserRequest
 from agent.core.state import ProjectState
+from agent.llm.usage import TokenBudget
 from agent.memory.store import MemoryStore
 from agent.planner.decomposition import decompose
 from agent.planner.execution_planner import create_execution_plan
@@ -29,6 +30,8 @@ from agent.planner.task_tree import TaskTree
 from agent.router.router import AgentRouter
 from agent.runner import ProjectOutcome, run_project
 from agent.supervisor.supervisor import Supervisor
+from agent.tools.base import Tool, ToolResult
+from agent.tools.file import FileTool
 
 # --- UserRequest ---
 
@@ -181,6 +184,45 @@ def test_supervisor_acceptance_gate_rejects_delivery(tmp_path: Path) -> None:
     assert events[-1].type == EventType.DELIVERY_REJECTED
 
 
+def test_supervisor_acceptance_receives_touched_paths(tmp_path: Path) -> None:
+    roles = tmp_path / "roles"
+    roles.mkdir(exist_ok=True)
+    (roles / "any.md").write_text("# Any\n职责：全栈。\n", encoding="utf-8")
+    agent = Agent(
+        name="Any",
+        role="any.md",
+        reason_fn=lambda role_prompt, task, context: "done",
+        roles_dir=roles,
+        tools=[FileTool(workspace=tmp_path)],
+    )
+    router = AgentRouter(llm_route_fn=lambda title, names: "Any")
+    router.register(agent)
+    writes = 0
+
+    def decide_fn(thought: object) -> Action:
+        nonlocal writes
+        if writes == 0:
+            writes += 1
+            return Action("file", {"operation": "write", "path": "out.txt", "content": "hi"})
+        return Action.finish("ok")
+
+    captured: dict[str, object] = {}
+
+    def acceptance_fn(plan, scope: tuple[str, ...] = ()) -> bool:
+        captured["scope"] = scope
+        return True
+
+    supervisor = Supervisor(
+        router=router,
+        decide_fn=decide_fn,
+        state=ProjectState(),
+        acceptance_fn=acceptance_fn,
+    )
+    result = supervisor.run_request(UserRequest(goal="写一个文件", tech_stack="Python"))
+    assert result.finished and result.accepted
+    assert captured["scope"] == ("out.txt",)
+
+
 def test_supervisor_run_request_writes_plan(tmp_path: Path) -> None:
     output = tmp_path / "out"
     supervisor = _supervisor(
@@ -238,3 +280,145 @@ def test_run_project_end_to_end_with_default_acceptance(tmp_path: Path) -> None:
 def test_run_project_rejects_without_goal() -> None:
     with pytest.raises(ValueError, match="goal"):
         run_project("", router=AgentRouter(), decide_fn=lambda thought: Action.finish())
+
+
+def test_agentloop_injects_code_snapshot_into_context(tmp_path: Path) -> None:
+    roles = tmp_path / "roles"
+    roles.mkdir()
+    (roles / "dev.md").write_text("# Dev\n职责：写码。\n", encoding="utf-8")
+    captured: list[str] = []
+
+    def reason_fn(role_prompt: str, task: str, context: str) -> str:
+        captured.append(context)
+        return "ACTION: finish"
+
+    agent = Agent(name="Dev", role="dev.md", reason_fn=reason_fn, roles_dir=roles)
+    loop = AgentLoop(
+        agent=agent,
+        decide_fn=lambda thought: Action.finish("done"),
+        state=ProjectState(task="t"),
+        code_snapshot_provider=lambda task: "def login():\n    pass",
+    )
+    result = loop.run("修复登录")
+    assert result.finished
+    assert captured and "## Existing Code" in captured[0]
+    assert "def login" in captured[0]
+
+
+def test_supervisor_review_receives_diff(tmp_path: Path) -> None:
+    summaries: list[str] = []
+
+    def review_fn(node, summary: str) -> bool:
+        summaries.append(summary)
+        return True
+
+    writes = 0
+
+    def decide_fn(thought: object) -> Action:
+        nonlocal writes
+        if writes == 0:
+            writes += 1
+            return Action("file", {"operation": "write", "path": "a.txt", "content": "new"})
+        return Action.finish("ok")
+
+    roles = tmp_path / "roles"
+    roles.mkdir(exist_ok=True)
+    (roles / "any.md").write_text("# Any\n职责：全栈。\n", encoding="utf-8")
+    agent = Agent(
+        name="Any",
+        role="any.md",
+        reason_fn=lambda role_prompt, task, context: "done",
+        roles_dir=roles,
+        tools=[FileTool(workspace=tmp_path)],
+    )
+    router = AgentRouter(llm_route_fn=lambda title, names: "Any")
+    router.register(agent)
+    supervisor = Supervisor(
+        router=router,
+        decide_fn=decide_fn,
+        state=ProjectState(),
+        review_fn=review_fn,
+        output_dir=tmp_path,
+    )
+    result = supervisor.run("写 a.txt")
+    assert result.finished
+    assert any("## Code diff" in s and "+new" in s for s in summaries)
+
+
+def test_supervisor_no_retries_when_token_budget_high(tmp_path: Path) -> None:
+    reviews = 0
+
+    def review_fn(node, summary: str) -> bool:
+        nonlocal reviews
+        reviews += 1
+        return False
+
+    budget = TokenBudget(limit=100, prompt_tokens=90)  # 90% 用量 → 不允许重试
+    supervisor = _supervisor(
+        tmp_path, max_retries=2, review_fn=review_fn, token_budget=budget
+    )
+    result = supervisor.run("开发电商商城平台")
+    assert not result.finished
+    assert reviews == 1
+    assert result.tokens_used == 90
+
+
+def test_supervisor_full_retries_when_budget_low(tmp_path: Path) -> None:
+    reviews = 0
+
+    def review_fn(node, summary: str) -> bool:
+        nonlocal reviews
+        reviews += 1
+        return False
+
+    budget = TokenBudget(limit=1000, prompt_tokens=10)  # 1% 用量 → 完整重试预算
+    supervisor = _supervisor(
+        tmp_path, max_retries=2, review_fn=review_fn, token_budget=budget
+    )
+    supervisor.run("开发电商商城平台")
+    assert reviews == 3
+
+
+def test_supervisor_stops_when_token_budget_exhausted(tmp_path: Path) -> None:
+    budget = TokenBudget(limit=100, prompt_tokens=100)
+    supervisor = _supervisor(tmp_path, token_budget=budget)
+    result = supervisor.run("开发电商商城平台")
+    assert not result.finished
+    assert result.failed == "(token budget exhausted)"
+    assert "token budget exhausted" in supervisor.memory.recent_failures()
+
+
+def test_failed_attempt_writes_failure_memory_and_changes_method(tmp_path: Path) -> None:
+    class _FailTool(Tool):
+        name = "boom"
+
+        def run(self, **kwargs: str) -> ToolResult:
+            return ToolResult.failure("kaboom")
+
+    roles = tmp_path / "roles"
+    roles.mkdir(exist_ok=True)
+    (roles / "any.md").write_text("# Any\n职责：全栈。\n", encoding="utf-8")
+    agent = Agent(
+        name="Any",
+        role="any.md",
+        reason_fn=lambda role_prompt, task, context: "done",
+        roles_dir=roles,
+        tools=[_FailTool()],
+    )
+    router = AgentRouter(llm_route_fn=lambda title, names: "Any")
+    router.register(agent)
+    memory = MemoryStore(root=tmp_path / "memory")
+    supervisor = Supervisor(
+        router=router,
+        decide_fn=lambda thought: Action("boom", {}),
+        state=ProjectState(),
+        memory=memory,
+        max_steps=2,
+        max_retries=1,
+    )
+    result = supervisor.run("写 x.py")
+    assert not result.finished
+    text = (memory.root / "failure_memory.md").read_text(encoding="utf-8")
+    assert "task failed" in text
+    assert "change approach" in text  # 同类错误第二次出现 → 换方法
+

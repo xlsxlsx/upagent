@@ -1,4 +1,4 @@
-"""依赖规划（new.md「五、重构 Planner」dependency_planner.py）。
+"""依赖规划（dev-notes/new.md「五、重构 Planner」dependency_planner.py）。
 
     backend depends database
     frontend depends backend

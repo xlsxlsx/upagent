@@ -1,4 +1,4 @@
-"""三层记忆（new.md「八、Memory 升级」）。
+"""三层记忆（dev-notes/new.md「八、Memory 升级」）。
 
 - ShortTermMemory   短期：当前任务在做什么（进程内，任务结束即弃）
 - ProjectMemory     项目长期：数据库用 PostgreSQL、认证用 JWT

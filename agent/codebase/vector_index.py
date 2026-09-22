@@ -1,4 +1,4 @@
-"""Embedding 代码检索骨架（new.md「四、3. Embedding Code Search」）。
+"""Embedding 代码检索骨架（dev-notes/new.md「四、3. Embedding Code Search」）。
 
 零依赖实现：embed_fn（文本 → 向量）由外部注入，默认关键字检索不受影响。
 - rag_keywords: 自然语言查询 → 去重关键词（供关键词版回退）

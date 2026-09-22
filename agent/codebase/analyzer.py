@@ -1,4 +1,4 @@
-"""AST 分析（new.md「四、2. AST 分析」）。
+"""AST 分析（dev-notes/new.md「四、2. AST 分析」）。
 
 Python 文件 → ast 结构化摘要；JS/TS/TSX/JSX → 零依赖正则启发式。
 两者输出统一的 FileSummary（classes/functions/imports/doc），
@@ -92,7 +92,7 @@ def _analyze_js(path: Path, root: Path) -> FileSummary:
 class FileSummary:
     """一个源文件的结构摘要。
 
-    输出形如 new.md 的示例：
+    输出形如 dev-notes/new.md 的示例：
 
         {file: "user.py", functions: ["login", "register"]}
     """

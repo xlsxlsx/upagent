@@ -1,4 +1,4 @@
-"""Fixer（new.md「十、Reflection 升级」fixer.py）。
+"""Fixer（dev-notes/new.md「十、Reflection 升级」fixer.py）。
 
 闭环第二步：诊断 → 修复指引。把 error_analyzer 的结构化诊断
 （Diagnosis）转成「修哪里、修什么、怎么验证」的补丁任务描述，

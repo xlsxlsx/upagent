@@ -1,4 +1,4 @@
-"""任务拆解（new.md「5. Planner」中的 decomposition）。
+"""任务拆解（dev-notes/new.md「5. Planner」中的 decomposition）。
 
 把大任务拆成任务树。默认拆解遵循八阶段生命周期骨架，
 Implementation 按关键词识别出 frontend / backend / database 等子域；

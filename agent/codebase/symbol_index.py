@@ -1,4 +1,4 @@
-"""符号索引（new.md「四、Code Intelligence Layer」symbol_index.py）。
+"""符号索引（dev-notes/new.md「四、Code Intelligence Layer」symbol_index.py）。
 
 符号名 → 定义位置列表，供「这个函数/类定义在哪」的快速查询。
 基于 analyzer 的 FileSummary 构建，不重复解析。

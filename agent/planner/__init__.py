@@ -1,4 +1,4 @@
-"""Planner — 任务规划器（new.md「5. Planner / 6. Task Tree」+「五、重构 Planner」）。"""
+"""Planner — 任务规划器（dev-notes/new.md「5. Planner / 6. Task Tree」+「五、重构 Planner」）。"""
 
 from agent.planner.decomposition import decompose
 from agent.planner.dependency_planner import execution_order, plan_dependencies

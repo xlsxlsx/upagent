@@ -1,4 +1,4 @@
-"""LLM 接入层（new.md 的 LLM 注入点落地）。
+"""LLM 接入层（dev-notes/new.md 的 LLM 注入点落地）。
 
 - config.py     .env / 环境变量 → LLMConfig（密钥不入库）
 - provider.py   OpenAI 兼容 /chat/completions 客户端（DeepSeek 等）

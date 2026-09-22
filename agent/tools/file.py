@@ -1,4 +1,4 @@
-"""File Tool（new.md「9. Tool System」中的 file.py）。
+"""File Tool（dev-notes/new.md「9. Tool System」中的 file.py）。
 
 读写文件，工作区约束：所有路径必须落在 workspace 根目录内，
 防路径穿越（security_rule.md）。写入是 Developer Agent 修改代码的

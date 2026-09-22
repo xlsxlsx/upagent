@@ -1,11 +1,11 @@
-"""Developer Agent — 最关键的 Code Agent（new.md「10. Code Agent」）。
+"""Developer Agent — 最关键的 Code Agent（dev-notes/new.md「10. Code Agent」）。
 
 流程：读取需求 → 读取架构 → 读取已有代码 → 生成修改计划 →
 修改代码 → 运行测试 → 修复错误 → 提交。
 
 Prompt 来自 roles/backend_engineer.md + knowledge/coding_standard.md
 + workflow/development.md（通过 ContextBuilder 注入知识文件）。
-写码-测试-修复循环与 Reflection Agent 协作（new.md「11.」）。
+写码-测试-修复循环与 Reflection Agent 协作（dev-notes/new.md「11.」）。
 """
 
 from __future__ import annotations

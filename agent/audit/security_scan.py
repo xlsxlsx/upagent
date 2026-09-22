@@ -1,4 +1,4 @@
-"""安全扫描器（new.md「十一、Audit Agent 重构」）。
+"""安全扫描器（dev-notes/new.md「十一、Audit Agent 重构」）。
 
 静态危险模式扫描：拼接 SQL、硬编码密钥、eval/exec、
 shell=True 拼接、innerHTML 赋值。复用 scanning.scan_lines。

@@ -1,4 +1,4 @@
-"""风险规划（new.md「五、重构 Planner」risk_planner.py）。
+"""风险规划（dev-notes/new.md「五、重构 Planner」risk_planner.py）。
 
     risk: payment security
 

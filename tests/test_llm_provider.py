@@ -202,3 +202,31 @@ def test_decompose_fn_falls_back_on_bad_json() -> None:
     provider = _FakeProvider("not json")
     plan = make_decompose_fn(provider)("开发登录功能", tech_stack="FastAPI")
     assert plan.root.children  # 规则拆解仍有节点
+
+
+def test_provider_complete_records_finish_reason() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                'choices': [
+                    {'message': {'content': 'x'}, 'finish_reason': 'length'}
+                ]
+            },
+        )
+
+    provider = OpenAICompatibleProvider(api_key='sk-test', client=_mock_client(handler))
+    assert provider.last_finish_reason is None
+    assert provider.complete([ChatMessage(role='user', content='x')]) == 'x'
+    assert provider.last_finish_reason == 'length'
+
+
+def test_provider_clears_finish_reason_on_http_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={'error': 'boom'})
+
+    provider = OpenAICompatibleProvider(api_key='sk-test', client=_mock_client(handler))
+    provider.last_finish_reason = 'length'
+    with pytest.raises(LLMError):
+        provider.complete([ChatMessage(role='user', content='x')])
+    assert provider.last_finish_reason is None

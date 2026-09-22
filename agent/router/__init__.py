@@ -1,4 +1,4 @@
-"""Agent Router（new.md「7. Agent Router」）。"""
+"""Agent Router（dev-notes/new.md「7. Agent Router」）。"""
 
 from agent.router.router import AgentRouter
 

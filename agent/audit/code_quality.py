@@ -1,4 +1,4 @@
-"""代码质量检查器（new.md「十一、第八阶段：Audit Agent 重构」）。
+"""代码质量检查器（dev-notes/new.md「十一、第八阶段：Audit Agent 重构」）。
 
 聚焦维护性初级信号：遗留 TODO/FIXME 注释。
 复用 scanning.scan_lines 逐行扫描，零依赖正则。

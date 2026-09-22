@@ -9,6 +9,8 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from agent.core.agent import ReasonFn, Thought
 from agent.core.loop import Action, DecideFn, StepFn
@@ -17,8 +19,11 @@ from agent.planner.decomposition import decompose
 from agent.planner.planner import DecomposeFn, Planner
 from agent.planner.task_tree import TaskNode, TaskTree
 from agent.router.router import LlmRouteFn
-from agent.supervisor.supervisor import TaskReviewFn
 
+if TYPE_CHECKING:
+    from agent.supervisor.supervisor import TaskReviewFn
+
+# --- 提示词常量：所有注入点的 system/user 模板（Prompt Engineering 层）---
 _DECIDE_SYSTEM = """你是任务执行调度器。根据 Agent 的思考决定下一步动作。
 运行环境：Windows（cmd 兼容）。避免 Unix 专用命令（pwd 用 cd、ls 用 dir、cat 用 type、
 python3 用 python）。终端工具执行的是 shell 命令，务必使用 Windows 可用命令。
@@ -27,6 +32,9 @@ python3 用 python）。终端工具执行的是 shell 命令，务必使用 Win
 {contracts}
 - 若任务已完成，输出 {{"kind": "finish", "note": "完成说明"}}
 - 否则输出 {{"kind": "<工具名>", "args": {{"参数名": "值"}}, "note": "目的"}}
+- 若本步有多个互不依赖的动作（写不同文件、互不引用结果），输出
+  {{"kind": "parallel", "actions": [{{"kind": "...", "args": {{...}}}}, ...], "note": "并行目的"}}
+  并行仅限路径互不重叠的独立动作；有依赖必须拆到后续步骤。
 只输出一个 JSON 对象，不要 Markdown 或额外文字。
 收敛规则（务必遵守，这是最高优先级）：
 1. 完成判据 = 任务目标已达成（产物已写入且验证通过）。达成后必须立即输出 finish。
@@ -123,6 +131,12 @@ as a JSON object inside an ```action fence:
 ```action
 {{"kind": "<tool name or finish>", "args": {{"param": "value"}}, "note": "why"}}
 ```
+To run several INDEPENDENT actions in the same step (different files/paths,
+no action uses another result), use:
+```action
+{{"kind": "parallel", "actions": [{{"kind": "...", "args": {{...}}}}, ...], "note": "why"}}
+```
+Never batch actions that touch the same path or depend on each other.
 
 # Rules (highest priority)
 1. Windows commands only: use cd / dir / type / findstr / python,
@@ -151,34 +165,47 @@ _STEP_USER = """## Task
 Give your brief reasoning, then exactly one action JSON inside an ```action fence.
 If you already have enough information, produce the artifact in THIS step."""
 
+_STEP_CONTINUE = """The JSON output below was cut off mid-stream.
+Continue it EXACTLY from the cut point:
+- Do not repeat any characters that are already present.
+- Do not add fences, Markdown, or commentary.
+- Output ONLY the remaining characters, so that appending your output directly
+  after the truncated text forms one complete valid JSON object.
+
+Truncated text:
+{truncated}"""
+
+
 
 _ACTION_FENCE_RE = re.compile(r"```(?:action|json)?\s*(.*?)```", re.DOTALL)
 _DSML_TAG_RE = re.compile(r"<\s*/?\s*[^>]*DSML[^>]*>", re.IGNORECASE)
 
 
-def parse_action_json(text: str) -> dict | None:
-    """从 LLM 输出中提取动作 JSON，容忍 ```action/```json 围栏、DSML 包裹与前后杂文。
-    解析失败返回 None（由调用方走回退路径）。"""
-    stripped = _DSML_TAG_RE.sub("", text)
-    for block in _ACTION_FENCE_RE.findall(stripped):
-        candidate = block.strip()
-        try:
-            data = json.loads(candidate)
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(data, dict):
-            return data
-    start = stripped.find("{")
+
+@dataclass(frozen=True, slots=True)
+class ActionJsonParse:
+    """动作 JSON 提取结果，附带截断分类。"""
+
+    data: dict | None
+    truncated: bool = False  # 文本在字符串值中间被截断
+    structural: bool = False  # JSON 对象开始后缺闭合大括号
+
+
+def _scan_json_candidate(candidate: str) -> tuple[dict | None, bool, bool]:
+    """扫描第一个可平衡闭合的 JSON 对象；无法闭合时分类截断点。
+
+    返回 (data, truncated_in_string, structural_unbalanced)。"""
+    start = candidate.find("{")
     while start != -1:
         depth = 0
         in_string = False
         escaped = False
-        for index in range(start, len(stripped)):
-            char = stripped[index]
+        for index in range(start, len(candidate)):
+            char = candidate[index]
             if in_string:
                 if escaped:
                     escaped = False
-                elif char == "\\":
+                elif char == chr(92):
                     escaped = True
                 elif char == '"':
                     in_string = False
@@ -191,16 +218,122 @@ def parse_action_json(text: str) -> dict | None:
                 depth -= 1
                 if depth == 0:
                     try:
-                        data = json.loads(stripped[start:index + 1])
+                        data = json.loads(candidate[start : index + 1])
                     except (json.JSONDecodeError, TypeError):
                         break
-                    return data if isinstance(data, dict) else None
-        start = stripped.find("{", start + 1)
+                    return data if isinstance(data, dict) else None, False, False
+        else:
+            if in_string:
+                return None, True, False
+            if depth > 0:
+                return None, False, True
+        start = candidate.find("{", start + 1)
+    return None, False, False
+
+
+def _extract_action_json(text: str) -> ActionJsonParse:
+    """提取动作 JSON 并分类截断点（供本地修复 / 续写决策）。
+
+    优先解析围栏块；围栏内无法解析时用扫描结果分类截断点，
+    再退化到整段文本扫描。"""
+    stripped = _DSML_TAG_RE.sub("", text)
+    for block in _ACTION_FENCE_RE.findall(stripped):
+        candidate = block.strip()
+        data, truncated, structural = _scan_json_candidate(candidate)
+        if data is not None or truncated or structural:
+            return ActionJsonParse(
+                data=data, truncated=truncated, structural=structural
+            )
+    data, truncated, structural = _scan_json_candidate(stripped)
+    return ActionJsonParse(data=data, truncated=truncated, structural=structural)
+
+
+def parse_action_json(text: str) -> dict | None:
+    """从 LLM 输出里提取动作 JSON（action/json 围栏、DSML 包裹、裸 JSON）。
+
+    解析失败返回 None，由调用方走降级路径；截断分类细节见
+    _extract_action_json（make_step_fn 的截断续写使用）。"""
+    return _extract_action_json(text).data
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """本地修复结构截断：补齐缺失的闭合大括号。
+
+    只修复「最后一个完整字符串值之后被截断」的情况（末字符是引号），
+    避免把字段本身被切掉的对象硬凑成可执行动作。"""
+    stripped = text.strip()
+    if not stripped.endswith('"'):
+        return None
+    start = stripped.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in stripped[start:]:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == chr(92):
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+    if in_string or depth <= 0:
+        return None
+    try:
+        data = json.loads(stripped[start:] + "}" * depth)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _continue_truncated_json(
+    provider: LLMProvider,
+    messages: list[ChatMessage],
+    truncated_text: str,
+    *,
+    retries: int = 1,
+) -> str | None:
+    """请求模型从截断点续写，拼接后重试解析。
+
+    每次尝试发一次续写请求；模型若整段重发 JSON 也接受。拼接结果
+    仍无法解析时返回 None（调用方继续走 decide 降级）。"""
+    combined = truncated_text
+    for _ in range(retries + 1):
+        try:
+            tail = provider.complete(
+                [
+                    *messages,
+                    ChatMessage(
+                        role="user",
+                        content=_STEP_CONTINUE.format(truncated=combined),
+                    ),
+                ],
+                temperature=0.0,
+                max_tokens=4096,
+            ).strip()
+        except Exception:
+            return None
+        if not tail:
+            return None
+        for candidate in (combined + tail, tail):
+            parsed = _extract_action_json(candidate)
+            if parsed.data is not None:
+                return candidate
+        combined = combined + tail
     return None
 
 
+
 def _action_from_data(data: dict, thought: Thought) -> Action | None:
-    """{kind, args, note} -> Action；finish/空 kind 按 finish 处理，非法 kind 返回 None。"""
+    """{kind, args, note} -> Action；支持 parallel（无依赖多动作并行）。"""
     kind = str(data.get("kind") or "finish").strip()
     raw_args = data.get("args")
     args = (
@@ -209,11 +342,26 @@ def _action_from_data(data: dict, thought: Thought) -> Action | None:
         else {}
     )
     note = str(data.get("note") or "")
+    if kind.lower() == "parallel":
+        raw_actions = data.get("actions")
+        if isinstance(raw_actions, list) and raw_actions:
+            subs: list[Action] = []
+            for item in raw_actions:
+                if not isinstance(item, dict):
+                    continue
+                sub = _action_from_data(item, thought)
+                if sub is not None and sub.kind != "finish":
+                    subs.append(sub)
+            if subs:
+                if len(subs) == 1:
+                    return subs[0]
+                return Action(kind="parallel", args={}, note=note, parallel=tuple(subs))
     if kind.lower() == "finish":
         return Action.finish(note=note or thought.content[:100])
     if not kind:
         return None
     return Action(kind=kind, args=args, note=note)
+
 
 
 def make_step_fn(
@@ -222,9 +370,11 @@ def make_step_fn(
     contracts: Callable[[str], str] | None = None,
     decide_fallback: DecideFn | None = None,
 ) -> StepFn:
-    """一步式（reason+decide 合并）：一次 LLM 调用输出简短推理 + 动作 JSON。
-    解析失败时回退 decide_fallback（再失败走规则 Planner）。
-    相比「reason 长推理 + decide 二次调用」，可把单步延迟从 ~25s 降到 ~2s。"""
+    """一步式（reason+decide 合并）单次 LLM 调用：推理 + 动作 JSON。
+
+    解析失败时的降级链：本地结构修复 -> 截断续写（finish_reason=length）
+    -> decide_fallback -> 规则 Planner。相比 reason + decide 两次调用，
+    可把单步延迟从约 25s 降到约 2s。"""
 
     def step(
         agent_name: str, role_prompt: str, task: str, context: str
@@ -237,22 +387,43 @@ def make_step_fn(
             contracts=details or "(none)",
         )
         user = _STEP_USER.format(task=task, context=context)
-        thought = Thought(agent_name=agent_name, task=task, content="")
+        messages = [
+            ChatMessage(role="system", content=system),
+            ChatMessage(role="user", content=user),
+        ]
         try:
             text = provider.complete(
-                [ChatMessage(role="system", content=system),
-                 ChatMessage(role="user", content=user)],
-                temperature=0.2,
-                max_tokens=2048,
+                messages, temperature=0.2, max_tokens=2048
             ).strip()
         except Exception:
             text = ""
         thought = Thought(agent_name=agent_name, task=task, content=text)
-        data = parse_action_json(text) if text else None
-        if data is not None:
-            action = _action_from_data(data, thought)
-            if action is not None:
-                return thought, action
+        # 动作 JSON 解析降级链（保证模型抖动不中断流程）：
+        #   1) 常规提取（action/json 围栏、DSML 包裹、裸 JSON）
+        #   2) 结构截断 → 本地补齐闭合大括号
+        #   3) finish_reason=length → 请求模型从截断点续写后拼接
+        #   4) decide_fallback（两段式 LLM 决策）
+        #   5) 规则 Planner.decide 兜底
+        if text:
+            parsed = _extract_action_json(text)
+            data = parsed.data
+            if data is None and parsed.structural:
+                data = _repair_truncated_json(text)
+            if (
+                data is None
+                and (parsed.truncated or parsed.structural)
+                and getattr(provider, "last_finish_reason", None) == "length"
+            ):
+                stitched = _continue_truncated_json(provider, messages, text)
+                if stitched is not None:
+                    thought = Thought(
+                        agent_name=agent_name, task=task, content=stitched
+                    )
+                    data = _extract_action_json(stitched).data
+            if data is not None:
+                action = _action_from_data(data, thought)
+                if action is not None:
+                    return thought, action
         if decide_fallback is not None:
             try:
                 return thought, decide_fallback(thought)
@@ -261,6 +432,7 @@ def make_step_fn(
         return thought, Planner().decide(thought)
 
     return step
+
 
 
 def make_reason_fn(provider: LLMProvider) -> ReasonFn:

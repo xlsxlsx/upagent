@@ -1,4 +1,4 @@
-"""核心 Agent 类（new.md「1. Agent Core / agent.py」）。
+"""核心 Agent 类（dev-notes/new.md「1. Agent Core / agent.py」）。
 
 一个 Agent = 名字 + 角色配置（roles/*.md）+ 工具集 + 记忆。
 角色 Markdown 是 Agent 的 Prompt 来源：职责、规则、输出格式。
@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,7 +21,24 @@ if TYPE_CHECKING:
 # 推理函数签名：(role_prompt, task, context) -> 原始思考文本
 ReasonFn = Callable[[str, str, str], str]
 
-AGENT_ROOT = Path(__file__).resolve().parent.parent
+def _resolve_agent_root() -> Path:
+    """Locate the agent package data dir (roles/, workflow/, ...).
+
+    In a PyInstaller bundle the package lives inside the extraction dir
+    (sys._MEIPASS); prefer an `agent/` folder next to the executable so
+    users can customize prompts, and fall back to the bundled copy.
+    """
+    if getattr(sys, "frozen", False):
+        exe_side = Path(sys.executable).resolve().parent / "agent"
+        if exe_side.is_dir():
+            return exe_side
+        bundle_side = Path(getattr(sys, "_MEIPASS", "")) / "agent"
+        if bundle_side.is_dir():
+            return bundle_side
+    return Path(__file__).resolve().parent.parent
+
+
+AGENT_ROOT = _resolve_agent_root()
 
 
 @dataclass(frozen=True)

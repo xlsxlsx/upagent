@@ -1,4 +1,4 @@
-"""审计评分卡（new.md「十一、Audit Agent 重构」）。
+"""审计评分卡（dev-notes/new.md「十一、Audit Agent 重构」）。
 
 把审计发现折算成三项分数（对应 FINAL_REPORT.md 格式）：
 

@@ -1,4 +1,4 @@
-"""文档检查器（new.md「十一、Audit Agent 重构」）。
+"""文档检查器（dev-notes/new.md「十一、Audit Agent 重构」）。
 
 项目使用文档完整性：README.md（入口说明）与 api.md（接口说明）。
 medium 级 architecture 发现，不阻塞交付结论。

@@ -1,4 +1,4 @@
-"""State 状态系统（new.md「3. State」）。
+"""State 状态系统（dev-notes/new.md「3. State」）。
 
 Agent 最大的问题是不知道自己做到哪里，所以必须有状态。
 ProjectState 对应 memory/project_memory.md 的结构化形态：

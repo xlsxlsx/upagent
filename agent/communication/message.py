@@ -1,4 +1,4 @@
-"""消息协议（new.md「8. Multi-Agent Communication」）。
+"""消息协议（dev-notes/new.md「8. Multi-Agent Communication」）。
 
 示例——Architect 派任务给 Backend::
 

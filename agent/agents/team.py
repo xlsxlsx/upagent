@@ -1,4 +1,4 @@
-"""团队工厂（new.md 角色体系的装配层，非 LLM 框架）。
+"""团队工厂（dev-notes/new.md 角色体系的装配层，非 LLM 框架）。
 
 roles/*.md 定义「谁」，build_team 按 task_type 装配默认工具集与角色文件，
 一次性注册进 AgentRouter。reason_fn 由调用方注入（生产接 LLM，测试用桩），

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from agent.llm.config import config_from_env, load_dotenv
 from agent.llm.provider import OpenAICompatibleProvider
+from agent.llm.usage import TokenBudget
 from agent.runner import run_llm_project
 
 
@@ -26,6 +27,9 @@ class TimingProvider:
         self.inner = inner
         self.calls = 0
         self.seconds = 0.0
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
 
     def complete(self, messages, **kwargs):
         started = time.perf_counter()
@@ -54,15 +58,19 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=10, help="单任务步数上限（默认 10）")
     parser.add_argument("--two-phase", action="store_true",
                         help="回退到 reason+decide 两次调用（对比基线，默认一步式）")
+    parser.add_argument("--token-budget", type=int, default=100_000,
+                        help="token 预算上限（重试收敛挂钩，默认 100k）")
     args = parser.parse_args()
 
     load_dotenv()
     config = config_from_env()
+    budget = TokenBudget(limit=args.token_budget)
     provider = TimingProvider(OpenAICompatibleProvider(
         api_key=config.api_key,
         base_url=config.base_url,
         model=config.model,
         timeout=config.timeout,
+        budget=budget,
     ))
     out = args.out or Path(tempfile.mkdtemp(prefix="llm-demo-"))
     out.mkdir(parents=True, exist_ok=True)
@@ -84,6 +92,7 @@ def main() -> None:
     print("\n===== summary =====")
     print(outcome.summary())
     print(f"\nLLM calls: {provider.calls}, total LLM time: {provider.seconds:.1f}s")
+    print(f"tokens used: {provider.tokens_used}/{budget.limit} (budget={budget.depleted})")
     report = Path(outcome.report_path) if outcome.report_path else None
     if report and report.is_file():
         print("\n===== final report =====")

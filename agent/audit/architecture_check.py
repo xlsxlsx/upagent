@@ -1,4 +1,4 @@
-"""架构检查器（new.md「十一、Audit Agent 重构」）。
+"""架构检查器（dev-notes/new.md「十一、Audit Agent 重构」）。
 
 交付文档齐全性检查：architecture.md / test_report.md /
 security_report.md / deployment.md 缺一即记 architecture 发现。

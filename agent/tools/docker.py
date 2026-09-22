@@ -1,4 +1,4 @@
-"""Docker Tool（new.md「九、Tool 系统大改」中的 docker）。
+"""Docker Tool（dev-notes/new.md「九、Tool 系统大改」中的 docker）。
 
 开发 Agent 的容器工作通道：只读/构建类子命令白名单
 （ps / images / logs / inspect / compose config / build）。

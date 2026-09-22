@@ -5,12 +5,18 @@ All offline with fake providers; real DeepSeek calls live in scripts/llm_demo.py
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from agent.core.agent import Agent, Thought
 from agent.core.loop import Action, AgentLoop, LoopResult
 from agent.core.state import ProjectState
-from agent.llm.bindings import make_step_fn, parse_action_json
+from agent.llm.bindings import (
+    _extract_action_json,
+    _repair_truncated_json,
+    make_step_fn,
+    parse_action_json,
+)
 from agent.planner.task_tree import TaskNode
 from agent.router.router import AgentRouter
 from agent.supervisor.supervisor import Supervisor
@@ -139,6 +145,19 @@ def test_loop_uses_step_fn_instead_of_reason_decide(tmp_path: Path) -> None:
     assert result.history == ("step 1: finish (done)",)
 
 
+def test_loop_step_observer_receives_every_history_entry(tmp_path: Path) -> None:
+    observed: list[tuple[str, str]] = []
+    agent = _loop_agent(tmp_path)
+    loop = AgentLoop(
+        agent=agent,
+        decide_fn=lambda thought: Action.finish("done"),
+        state=ProjectState(task="x"),
+        step_observer=lambda name, entry: observed.append((name, entry)),
+    )
+    loop.run("write x")
+    assert observed == [("Dev", "step 1: finish (done)")]
+
+
 # --- Supervisor deterministic artifact witness ---
 
 
@@ -200,3 +219,178 @@ def test_review_tests_gate_skips_without_tests(tmp_path: Path) -> None:
     node = TaskNode(title="write and run pytest", task_type="testing")
     result = LoopResult(steps=1, finished=True, history=("step 1: finish",))
     assert supervisor._review(node, result) is True
+
+
+
+# --- truncation classification and local repair ---
+
+
+def test_extract_action_json_classifies_in_string_truncation() -> None:
+    payload = {'kind': 'file', 'args': {'path': 'a.py', 'content': 'def main()'}}
+    full = json.dumps(payload)
+    cut = full.find('main') + 2
+    text = chr(96) * 3 + 'action' + chr(10) + full[:cut]
+    parsed = _extract_action_json(text)
+    assert parsed.data is None
+    assert parsed.truncated and not parsed.structural
+
+
+def test_extract_action_json_classifies_structural_truncation() -> None:
+    full = json.dumps({'kind': 'file', 'args': {'path': 'a.py'}})
+    text = chr(96) * 3 + 'action' + chr(10) + full[:-1]
+    parsed = _extract_action_json(text)
+    assert parsed.data is None
+    assert parsed.structural and not parsed.truncated
+
+
+def test_repair_truncated_json_closes_missing_braces() -> None:
+    data = {'kind': 'finish', 'note': 'done'}
+    assert _repair_truncated_json(json.dumps(data)[:-1]) == data
+
+
+def test_repair_truncated_json_refuses_string_truncation() -> None:
+    full = json.dumps({'kind': 'file', 'args': {'content': 'def main()'}})
+    text = full[: full.find('main') + 2]
+    assert _repair_truncated_json(text) is None
+
+
+def test_repair_truncated_json_refuses_incomplete_fields() -> None:
+    full = json.dumps({'kind': 'file', 'args': {'path': 'a.py'}})
+    text = full[:-2] + ','
+    assert _repair_truncated_json(text) is None
+
+
+# --- make_step_fn truncation fallback chain ---
+
+
+class _ScriptedProvider:
+    def __init__(self, texts, finish_reasons=None) -> None:
+        self.texts = list(texts)
+        self.finish_reasons = finish_reasons or [None] * len(self.texts)
+        self.calls = []
+        self.last_finish_reason = None
+
+    def complete(self, messages, **kwargs) -> str:
+        index = len(self.calls)
+        self.calls.append({'messages': messages, 'kwargs': kwargs})
+        self.last_finish_reason = self.finish_reasons[
+            min(index, len(self.finish_reasons) - 1)
+        ]
+        return self.texts[min(index, len(self.texts) - 1)]
+
+
+def test_step_fn_continues_truncated_action_json() -> None:
+    payload = {'kind': 'file', 'args': {'path': 'a.py', 'content': 'print(1)'}}
+    full = json.dumps(payload)
+    cut = full.find('print(1)') + 8
+    truncated = chr(96) * 3 + 'action' + chr(10) + full[:cut]
+    tail = full[cut:] + chr(10) + chr(96) * 3
+    provider = _ScriptedProvider(
+        [truncated, tail], finish_reasons=['length', 'stop']
+    )
+    step = make_step_fn(provider, tool_names=lambda name: ['file'], contracts=lambda name: '')
+    thought, action = step('Backend', 'role', 'task', 'context')
+    assert len(provider.calls) == 2
+    assert action.kind == 'file'
+    assert action.args == payload['args']
+
+
+def test_step_fn_continues_structural_truncation() -> None:
+    payload = {'kind': 'file', 'args': {'path': 'a.py', 'content': 'x'}}
+    full = json.dumps(payload)
+    cut = full.find(', ') + 1
+    truncated = chr(96) * 3 + 'action' + chr(10) + full[:cut]
+    tail = full[cut:] + chr(10) + chr(96) * 3
+    provider = _ScriptedProvider(
+        [truncated, tail], finish_reasons=['length', 'stop']
+    )
+    step = make_step_fn(provider, tool_names=lambda name: ['file'], contracts=lambda name: '')
+    thought, action = step('Backend', 'role', 'task', 'context')
+    assert len(provider.calls) == 2
+    assert action.args == payload['args']
+
+
+def test_step_fn_repairs_safe_structural_truncation_locally() -> None:
+    full = json.dumps({'kind': 'finish', 'note': 'done'})
+    truncated = chr(96) * 3 + 'action' + chr(10) + full[:-1]
+    provider = _ScriptedProvider([truncated], finish_reasons=['length'])
+    step = make_step_fn(provider)
+    thought, action = step('Backend', 'role', 'task', 'context')
+    assert len(provider.calls) == 1
+    assert action.kind == 'finish' and action.note == 'done'
+
+
+def test_step_fn_no_continuation_without_length_reason() -> None:
+    payload = {'kind': 'file', 'args': {'path': 'a.py', 'content': 'print(1)'}}
+    full = json.dumps(payload)
+    cut = full.find('print(1)') + 8
+    truncated = chr(96) * 3 + 'action' + chr(10) + full[:cut]
+    provider = _ScriptedProvider([truncated], finish_reasons=['stop'])
+    fallback_calls = []
+
+    def decide_fallback(thought):
+        fallback_calls.append(1)
+        return Action.finish('fallback')
+
+    step = make_step_fn(provider, decide_fallback=decide_fallback)
+    thought, action = step('Backend', 'role', 'task', 'context')
+    assert len(provider.calls) == 1
+    assert fallback_calls == [1]
+    assert action.kind == 'finish'
+
+
+def test_step_fn_decide_fallback_when_continuation_fails() -> None:
+    payload = {'kind': 'file', 'args': {'path': 'a.py', 'content': 'print(1)'}}
+    full = json.dumps(payload)
+    cut = full.find('print(1)') + 8
+    truncated = chr(96) * 3 + 'action' + chr(10) + full[:cut]
+    provider = _ScriptedProvider(
+        [truncated, 'still not json', 'still not json'],
+        finish_reasons=['length', 'length', 'length'],
+    )
+    fallback_calls = []
+
+    def decide_fallback(thought):
+        fallback_calls.append(1)
+        return Action.finish('fallback')
+
+    step = make_step_fn(provider, decide_fallback=decide_fallback)
+    thought, action = step('Backend', 'role', 'task', 'context')
+    assert len(provider.calls) == 3
+    assert fallback_calls == [1]
+    assert action.kind == 'finish'
+
+
+def test_step_fn_accepts_continuation_that_repeats_full_json() -> None:
+    payload = {'kind': 'file', 'args': {'path': 'a.py', 'content': 'x'}}
+    full = json.dumps(payload)
+    cut = full.find('x') + 1
+    truncated = chr(96) * 3 + 'action' + chr(10) + full[:cut]
+    tail = chr(96) * 3 + 'action' + chr(10) + full + chr(10) + chr(96) * 3
+    provider = _ScriptedProvider(
+        [truncated, tail], finish_reasons=['length', 'stop']
+    )
+    step = make_step_fn(provider, tool_names=lambda name: ['file'], contracts=lambda name: '')
+    thought, action = step('Backend', 'role', 'task', 'context')
+    assert action.kind == 'file'
+    assert action.args == payload['args']
+
+
+def test_step_fn_parses_parallel_actions() -> None:
+    text = (
+        'reasoning\n```action\n'
+        '{"kind": "parallel", "actions": ['
+        '{"kind": "file", "args": {"path": "a.txt"}},'
+        '{"kind": "file", "args": {"path": "b.txt"}}]}\n```'
+    )
+    provider = _FixedProvider(text)
+    step = make_step_fn(
+        provider,
+        tool_names=lambda name: ["file"],
+        contracts=lambda name: "file: operation(read|write|exists), path, content",
+    )
+    thought, action = step("Backend", "role prompt", "write two files", "context")
+    assert action.kind == "parallel"
+    assert len(action.parallel) == 2
+    assert [sub.args["path"] for sub in action.parallel] == ["a.txt", "b.txt"]
+

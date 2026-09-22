@@ -1,4 +1,4 @@
-"""执行计划（new.md「五、重构 Planner」execution_planner.py）。
+"""执行计划（dev-notes/new.md「五、重构 Planner」execution_planner.py）。
 
 把任务拆解、依赖关系、风险识别汇总成一份完整执行计划：
 
@@ -61,6 +61,10 @@ def create_execution_plan(
 
     tech_stack 参与子域识别（见 decomposition._match_domains）。
     """
+    # 1) 拆解任务树（规则版或 LLM 版 decompose_fn，单/双参数签名兼容）
+    # 2) 提取 Implementation 子域 → 依赖图 → 拓扑序
+    # 3) 按拓扑序重排 Implementation 子节点（决定 next_task 取叶顺序）
+    # 4) 风险清单（assess_fn 可注入 LLM 版）
     try:
         tree = decompose_fn(task, tech_stack)
     except TypeError:

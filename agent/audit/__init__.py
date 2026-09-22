@@ -1,4 +1,4 @@
-"""Final Audit（new.md「十一、Audit Agent 重构」）。
+"""Final Audit（dev-notes/new.md「十一、Audit Agent 重构」）。
 
 audit_agent 编排五个 checker（代码/安全/架构/性能/文档）；
 scoring 折算 Function/Security/Maintainability 三维评分。

@@ -6,7 +6,13 @@ from pathlib import Path
 
 import pytest
 from agent.codebase.analyzer import analyze_file, analyze_tree
-from agent.codebase.search import CodeSearch
+from agent.codebase.search import (
+    CodeSearch,
+    SearchHit,
+    keywords_from,
+    make_snapshot_provider,
+    render_snapshot,
+)
 from agent.codebase.vector_index import VectorIndex, cosine, rag_keywords
 
 
@@ -81,3 +87,46 @@ def test_code_search_vector_branch(tmp_path: Path) -> None:
     assert CodeSearch(root=tmp_path, embed_fn=_dummy_embed).search([]) == []
     keyword_hits = CodeSearch(root=tmp_path).search(["login"])
     assert keyword_hits and keyword_hits[0].path == "a.py"
+
+
+def test_keywords_from_filters_stopwords_and_ranks() -> None:
+    keywords = keywords_from("implement login logic and fix the login token bug")
+    assert keywords[0] == "login"
+    assert "the" not in keywords and "implement" not in keywords
+    assert "and" not in keywords
+    assert keywords_from("") == []
+    assert keywords_from("纯中文标题") == []
+
+
+def test_render_snapshot_renders_hits_and_caps_length() -> None:
+    hits = [SearchHit(path="a.py", score=100.0, preview="line of code")]
+    rendered = render_snapshot(hits)
+    assert "a.py" in rendered and "line of code" in rendered
+    assert render_snapshot([], 10) == ""
+
+
+def test_make_snapshot_provider_renders_existing_code(tmp_path: Path) -> None:
+    (tmp_path / "auth.py").write_text(
+        "def login():\n    return check_token()\n", encoding="utf-8"
+    )
+    (tmp_path / "unrelated.py").write_text("def home():\n    pass\n", encoding="utf-8")
+    provider = make_snapshot_provider(tmp_path)
+    snapshot = provider("修改 login 逻辑与 token 校验")
+    assert "auth.py" in snapshot and "def login" in snapshot
+    assert provider("") == ""
+
+
+def test_snapshot_provider_handles_missing_root(tmp_path: Path) -> None:
+    provider = make_snapshot_provider(tmp_path / "nope")
+    assert provider("login") == ""
+
+
+def test_code_search_cache_refreshes_changed_files(tmp_path: Path) -> None:
+    target = tmp_path / "a.py"
+    target.write_text("def login():\n    pass\n", encoding="utf-8")
+    search = CodeSearch(root=tmp_path)
+    assert search.search(["login"])[0].path == "a.py"
+    target.write_text("def logout():\n    pass\n", encoding="utf-8")
+    hits = search.search(["logout"])
+    assert hits and hits[0].path == "a.py"
+

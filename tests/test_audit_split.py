@@ -98,3 +98,23 @@ def test_audit_agent_extra_patterns_category(tmp_path: Path) -> None:
     custom = [f for f in report.findings if f.description == "custom danger"]
     assert custom and custom[0].category == "security"
     assert isinstance(custom[0], AuditFinding)
+
+
+def test_audit_scope_filters_findings_to_touched_files(tmp_path: Path) -> None:
+    (tmp_path / "bad.py").write_text('password = "supersecret123"\n', encoding="utf-8")
+    (tmp_path / "ok.py").write_text("x = 1\n", encoding="utf-8")
+    report = AuditAgent(project_root=tmp_path).audit(scope=("ok.py",))
+    assert report.passed
+    assert all("bad.py" not in f.location for f in report.findings)
+
+
+def test_audit_scope_keeps_findings_in_touched_files(tmp_path: Path) -> None:
+    (tmp_path / "bad.py").write_text('password = "supersecret123"\n', encoding="utf-8")
+    report = AuditAgent(project_root=tmp_path).audit(scope=("bad.py",))
+    assert not report.passed
+    assert "hardcoded secret" in {f.description for f in report.findings}
+
+
+def test_audit_scope_skips_delivery_doc_checks(tmp_path: Path) -> None:
+    report = AuditAgent(project_root=tmp_path).audit(scope=("a.py",))
+    assert not any(f.category == "architecture" for f in report.findings)

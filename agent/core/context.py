@@ -1,4 +1,4 @@
-"""Context 管理（new.md「4. Context」）。
+"""Context 管理（dev-notes/new.md「4. Context」）。
 
 LLM 不知道整个项目，所以每次推理前要拼装上下文：
 
@@ -44,7 +44,7 @@ class ContextBuilder:
         repo_map: str = "",
         history: list[str] | None = None,
     ) -> str:
-        """按 new.md 的五要素组装上下文文本；history 注入最近执行步骤。"""
+        """按 dev-notes/new.md 的五要素组装上下文文本；history 注入最近执行步骤。"""
         sections: list[str] = [
             _section("User Task", user_task),
             _section("Project State", state.summary()),

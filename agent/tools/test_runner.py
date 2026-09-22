@@ -1,4 +1,4 @@
-"""Test Runner Tool（new.md「九、Tool 系统大改」中的 test_runner）。
+"""Test Runner Tool（dev-notes/new.md「九、Tool 系统大改」中的 test_runner）。
 
 对 TerminalTool 的专用封装：只跑测试命令，输出结构化摘要
 （passed/failed 计数），供 Reflection 修复循环直接消费。
@@ -38,7 +38,7 @@ class TestRunnerTool(Tool):
 
 @dataclass
 class PackageManagerTool(Tool):
-    """包管理（new.md 的 package_manager）：只放行安装/查询类子命令。"""
+    """包管理（dev-notes/new.md 的 package_manager）：只放行安装/查询类子命令。"""
 
     terminal: TerminalTool = field(default_factory=TerminalTool)
     name: str = "package_manager"

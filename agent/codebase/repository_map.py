@@ -1,4 +1,4 @@
-"""Repository Map（new.md「四、1. Repository Map」）。
+"""Repository Map（dev-notes/new.md「四、1. Repository Map」）。
 
 类似 Cursor / Claude Code：生成 project_map.md，
 Agent 每次编码前读取 → 注入 Context → LLM。

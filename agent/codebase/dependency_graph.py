@@ -1,4 +1,4 @@
-"""依赖图（new.md「四、Code Intelligence Layer」dependency_graph.py）。
+"""依赖图（dev-notes/new.md「四、Code Intelligence Layer」dependency_graph.py）。
 
 谁导入了谁 → 修改影响面。修改一个模块前先问：
 impacted_by(module) 有哪些文件会受影响。

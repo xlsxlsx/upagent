@@ -1,4 +1,4 @@
-"""性能检查器（new.md「十一、Audit Agent 重构」）。
+"""性能检查器（dev-notes/new.md「十一、Audit Agent 重构」）。
 
 零依赖轻量启发式（不做真实 profiling）：
 - N+1 查询：循环头之后紧跟 DB 调用（execute/query/cursor）

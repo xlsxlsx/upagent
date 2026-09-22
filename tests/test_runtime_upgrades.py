@@ -1,4 +1,4 @@
-"""agent/ 升级模块测试（new.md 八阶段升级路线）。
+"""agent/ 升级模块测试（dev-notes/new.md 八阶段升级路线）。
 
 覆盖：codebase 代码智能层、planner 升级、Event Bus、Supervisor、
 三层记忆、Patch/TestRunner 工具、Reflection 升级、审计评分。

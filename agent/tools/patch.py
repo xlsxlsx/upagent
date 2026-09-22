@@ -1,4 +1,4 @@
-"""Patch Tool（new.md「九、特别增加：Patch Tool」）。
+"""Patch Tool（dev-notes/new.md「九、特别增加：Patch Tool」）。
 
 不让 Agent 直接写文件：生成 -old/+new 差异 → 审核 → 应用。
 这是 Cursor 的核心工作方式。

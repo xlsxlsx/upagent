@@ -1,4 +1,4 @@
-"""Code Intelligence Layer（new.md「四、Code Intelligence Layer」）。
+"""Code Intelligence Layer（dev-notes/new.md「四、Code Intelligence Layer」）。
 
 LLM 不知道项目结构、文件关系、代码依赖、修改影响面，
 容易生成垃圾代码。本包在每次编码前提供：

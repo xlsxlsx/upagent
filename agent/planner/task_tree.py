@@ -1,4 +1,4 @@
-"""Task Tree（new.md「6. Task Tree」）。
+"""Task Tree（dev-notes/new.md「6. Task Tree」）。
 
 Agent 不应该一次完成，应该按任务树推进：
 

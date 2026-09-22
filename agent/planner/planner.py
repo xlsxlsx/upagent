@@ -1,4 +1,4 @@
-"""Planner（new.md「5. Planner」）。
+"""Planner（dev-notes/new.md「5. Planner」）。
 
 职责一：create_plan(task, tech_stack) → TaskTree（把大任务拆小）。
 职责二：decide(thought) → Action（Agent Loop 的第三步）。

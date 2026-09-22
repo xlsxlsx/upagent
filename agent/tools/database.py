@@ -1,4 +1,4 @@
-"""Database Tool（new.md「九、Tool 系统大改」中的 database）。
+"""Database Tool（dev-notes/new.md「九、Tool 系统大改」中的 database）。
 
 对齐 agent/tools/database.md 的能力与限制：
 

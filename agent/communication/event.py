@@ -1,4 +1,4 @@
-"""Event Bus（new.md「七、Agent Communication 升级」）。
+"""Event Bus（dev-notes/new.md「七、Agent Communication 升级」）。
 
 从「点对点消息」升级为「事件驱动」：
 
@@ -37,6 +37,7 @@ class EventType(StrEnum):
     DELIVERY_ACCEPTED = "delivery_accepted"
     DELIVERY_REJECTED = "delivery_rejected"
     PHASE_ROLLED_BACK = "phase_rolled_back"  # 阶段失败 → 回退到问题阶段
+    FILES_REVERTED = "files_reverted"  # 文件级回滚：恢复被误删/误改的产物文件
 
 
 @dataclass(frozen=True)

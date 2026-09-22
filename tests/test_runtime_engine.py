@@ -1,4 +1,4 @@
-"""agent/ 运行时引擎测试（new.md 可执行系统）。
+"""agent/ 运行时引擎测试（dev-notes/new.md 可执行系统）。
 
 全部使用桩 reason_fn / 假工具，不依赖真实 LLM 与网络。
 """
@@ -203,6 +203,36 @@ def test_loop_max_steps_guard(tmp_path: Path) -> None:
     )
     result = loop.run("x")
     assert not result.finished and result.steps == 3
+
+
+def test_loop_records_touched_paths(tmp_path: Path) -> None:
+    agent = make_agent(
+        tmp_path,
+        ["ACTION: file\nARG operation=write\nARG path=out.txt\nARG content=hi", "全部完成"],
+        tools=[FileTool(workspace=tmp_path)],
+    )
+    result = AgentLoop(
+        agent=agent, decide_fn=Planner().decide, state=ProjectState(task="x")
+    ).run("x")
+    assert result.finished
+    assert result.touched_paths == ("out.txt",)
+
+
+def test_loop_dedupes_touched_paths(tmp_path: Path) -> None:
+    agent = make_agent(
+        tmp_path,
+        [
+            "ACTION: file\nARG operation=write\nARG path=out.txt\nARG content=hi",
+            "ACTION: file\nARG operation=write\nARG path=out.txt\nARG content=bye",
+            "全部完成",
+        ],
+        tools=[FileTool(workspace=tmp_path)],
+    )
+    result = AgentLoop(
+        agent=agent, decide_fn=Planner().decide, state=ProjectState(task="x")
+    ).run("x")
+    assert result.finished
+    assert result.touched_paths == ("out.txt",)
 
 
 def test_loop_auto_finishes_on_repeated_success(tmp_path: Path) -> None:

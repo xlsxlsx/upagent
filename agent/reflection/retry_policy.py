@@ -1,4 +1,4 @@
-"""重试策略（new.md「十、Reflection 升级」retry_policy.py）。
+"""重试策略（dev-notes/new.md「十、Reflection 升级」retry_policy.py）。
 
 Rule 6：同一错误连续出现两次必须换方法，不允许原地死磕。
 

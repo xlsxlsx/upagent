@@ -1,4 +1,4 @@
-"""Tool System（new.md「9. Tool System」+「九、Tool 系统大改」）。
+"""Tool System（dev-notes/new.md「9. Tool System」+「九、Tool 系统大改」）。
 
 Agent 不直接操作电脑，它调用 Tool。
 写代码优先走 PatchTool（diff → 审核 → 应用），不直接写文件。

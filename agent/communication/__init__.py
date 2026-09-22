@@ -1,4 +1,4 @@
-"""Multi-Agent Communication（new.md「8.」+「七、Event Bus 升级」）。
+"""Multi-Agent Communication（dev-notes/new.md「8.」+「七、Event Bus 升级」）。
 
 Agent 之间不能直接聊天：点对点走 Message，广播协作走 Event。
 """
