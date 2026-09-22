@@ -1,6 +1,6 @@
 # Testing Workflow
 
-覆盖 Task Lifecycle 的 Phase 5（Testing），由 Tester（QA Engineer）主导。
+覆盖 Task Lifecycle 的 testing 阶段，由 Tester（QA Engineer）主导。
 
 ## 流程
 
@@ -15,7 +15,7 @@
     ↓
 输出 test_report.md
     ↓
-结论：通过 → Phase 6 / 不通过 → Bug 回给工程师
+结论：通过 → security 阶段 / 不通过 → Bug 回给工程师
 ```
 
 ## 三层测试策略

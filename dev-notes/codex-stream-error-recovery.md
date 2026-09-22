@@ -43,7 +43,7 @@ The fix preserves Tau's layer boundaries:
   provider event into `agent-calls.jsonl`. Bodies and full payloads stay out.
 - `tau_coding.tui.app` appends "Run ended before completion. Send a message to
   retry." to terminal error blocks, except for context-overflow errors, which
-  Tau already auto-compacts and retries.
+  Tau already compacts and retries once.
 
 ## How to test
 

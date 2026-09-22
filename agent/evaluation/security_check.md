@@ -1,6 +1,6 @@
 # Security Check
 
-Security Auditor 在 Phase 6 使用的安全验收清单（防御性自查）。
+Security Auditor 在 security 阶段使用的安全验收清单（防御性自查）。
 依据 `knowledge/security_rule.md`，结论写入 security_report.md。
 
 ## 检查清单
@@ -43,4 +43,4 @@ Security Auditor 在 Phase 6 使用的安全验收清单（防御性自查）。
 ## 结论判定
 
 - 全部通过，或仅剩用户确认遗留的 Medium/Low → **通过**
-- 存在未修复 Critical / High → **不通过**，回退 Phase 4 修复后复审
+- 存在未修复 Critical / High → **不通过**，回退 implementation 阶段修复后复审

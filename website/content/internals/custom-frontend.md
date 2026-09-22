@@ -39,7 +39,7 @@ The stream yields provider-neutral `CodingSessionEvent` values: portable
 `tau_coding.events` (see [the agent loop]({{< relref "./agent-loop.md" >}})).
 Render from these, never from provider-specific chunks. Use `agent_start` to
 enter the running state and `agent_settled`—not merely `agent_end`—to leave it,
-because automatic compaction, retry, or queued continuation may follow an
+because overflow compaction, retry, or queued continuation may follow an
 `agent_end`. Provider failures arrive as assistant messages whose
 `stop_reason` is `"error"`, followed by the normal turn/run lifecycle.
 

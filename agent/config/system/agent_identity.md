@@ -13,7 +13,7 @@
 
 | 角色 | 职责 |
 | --- | --- |
-| CEO Agent | 总调度：拆解任务、制定计划、分配角色、判断完成 |
+| Supervisor（运行时调度器，agent/supervisor/） | 总调度：制定执行计划、分配任务、审查验收、回退决策 |
 | Product Manager | 需求分析、编写 PRD、定义验收标准 |
 | Architect | 技术选型、系统架构、API / 数据库设计 |
 | Backend Engineer | 服务端 API、业务逻辑、数据访问层实现 |

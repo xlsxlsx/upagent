@@ -47,7 +47,6 @@ features and fixes.
 | `--mode [text\|json\|transcript]` | Output mode for print mode (default `text`); also triggers print mode on its own |
 | `--session TEXT` | Resume a session id in the TUI |
 | `--new-session` | Start a new session instead of resuming the default |
-| `--auto-compact-threshold INT` | Auto-compact above this rough token estimate |
 | `-e, --extension PATH` | Load an [extension]({{< relref "../guides/extensions.md" >}}) file or directory (repeatable) |
 | `--no-extensions` | Disable extension directory discovery (explicit `-e` paths still load) |
 | `--project-extensions` | Also load `<project>/.tau/extensions` (runs project-supplied code at startup) |

@@ -4,7 +4,7 @@
 用户输入「最终目标 + 可能的技术栈」，Agent 通过
 **计划 → 执行 → 审查** 完成代码开发与交付。
 
-结构翻新自 `new.md` 的设计草案：Markdown 是配置与知识层，
+结构翻新自 `dev-notes/new.md` 的设计草案：Markdown 是配置与知识层，
 `core/ planner/ router/ communication/ tools/ agents/ reflection/ audit/`
 下的 Python 模块是可执行的运行时引擎。
 
@@ -36,8 +36,8 @@ agent/
 │   ├── memory_strategy.md        三层记忆的读写时机
 │   └── review_strategy.md        Patch 审核与阶段评审标准
 │
-├── roles/                        十个角色配置（职责 / 输入 / 输出 / 准则）
-│   ├── ceo_agent.md              总调度
+├── roles/                        九个角色配置（职责 / 输入 / 输出 / 准则，由
+│                                 agents/team.py 装配；总调度由 supervisor.py 承担）
 │   ├── product_manager.md        PRD
 │   ├── architect.md              架构设计
 │   ├── backend_engineer.md       服务端
@@ -49,12 +49,12 @@ agent/
 │   └── code_reviewer.md          代码评审
 │
 ├── workflow/                     流程与阶段门禁
-│   ├── task_lifecycle.md         八阶段生命周期（总纲，禁止跳过）
-│   ├── planning.md               Phase 1–3：需求 / 计划 / 架构
-│   ├── development.md            Phase 4 & 7：开发 / 优化
-│   ├── testing.md                Phase 5：测试
-│   ├── audit.md                  Phase 6：安全审计
-│   ├── deployment.md             Phase 8：交付部署
+│   ├── task_lifecycle.md         生命周期总纲（禁止跳过）
+│   ├── planning.md               requirement / architecture：需求 / 架构
+│   ├── development.md            implementation：开发（含性能优化）
+│   ├── testing.md                testing：测试
+│   ├── audit.md                  security：安全审计
+│   ├── deployment.md             deploy：交付部署
 │   ├── bug_fix.md                缺陷修复流程（复现→定位→修复→验证）
 │   ├── feature_development.md    功能开发流程
 │   ├── refactoring.md            重构流程（小步改 + 步步验证）
@@ -73,15 +73,15 @@ agent/
 │
 ├── memory/                       项目记忆（执行中持续更新）
 │   ├── project_memory.md         当前状态（单一事实来源）
-│   ├── decision_log.md           决策日志（只追加）
-│   └── failure_memory.md         失败教训（同错不二犯）
+│   ├── decision_log.template.md  决策日志模板（git 跟踪）
+│   ├── failure_memory.template.md 失败教训模板（git 跟踪）
+│   └── decision_log.md / failure_memory.md / project_facts.md  运行时副本（已 gitignore）
 │
 ├── tools/                        工具能力与限制
 │   ├── terminal.md               shell / build / test
 │   ├── git.md                    提交规范与红线
 │   ├── browser.md                页面验证与资料检索
-│   ├── database.md               迁移与查询
-│   └── code_execution.md         运行验证
+│   └── database.md               迁移与查询
 │
 └── evaluation/                   验收体系
     ├── quality_check.md          代码质量清单（评审用）
@@ -95,7 +95,8 @@ agent/
 agent/
 ├── core/                         Agent 核心
 │   ├── agent.py                  Agent 类：角色 md 即 Prompt，reason_fn 注入 LLM
-│   ├── loop.py                   Agent Loop：思考→决策→执行→记录（max_steps 防失控）
+│   ├── loop.py                   Agent Loop：思考→决策→执行→记录（max_steps 防失控、
+│                                 step_fn 一步式、无依赖并行、diff 快照、重复成功动作兜底 finish）
 │   ├── state.py                  ProjectState：八阶段生命周期 + JSON 持久化
 │   └── context.py                ContextBuilder：需求+状态+记忆+知识 五要素拼装
 │
@@ -113,13 +114,22 @@ agent/
 │   ├── symbol_index.py           符号 → 定义位置
 │   ├── dependency_graph.py       import 关系 + 修改影响面
 │   ├── repository_map.py         project_map.md 生成（注入 Context）
-│   └── search.py                 关键词代码检索（embed_fn 可注入向量版）
+│   └── search.py                 关键词代码检索 + 增量缓存（embed_fn 可注入向量版；
+│                                 make_snapshot_provider 接主循环）
 │
-├── supervisor/supervisor.py      总调度：分派→执行→审查门禁→终审验收→回退重做→记失败
+├── llm/                          LLM 适配层（核心零依赖，仅 provider 用 httpx）
+│   ├── provider.py               OpenAI 兼容 /chat/completions（默认 DeepSeek）
+│   ├── bindings.py               reason/decide/step/review/route/decompose 注入函数 +
+│   │                             JSON 容错降级链（截断修复/续写/规则回退）
+│   ├── config.py                 .env / 环境变量 → LLMConfig（密钥不入库）
+│   └── usage.py                  TokenBudget：重试预算挂钩、耗尽即停
+│
+├── supervisor/                   supervisor.py 总调度：分派→执行→审查门禁→终审验收→回退重做→记失败；
+│                                 file_snapshot.py 文件级回滚：写前备份、验收失败恢复
 ├── runner.py                     run_project：用户输入 → 计划 → 执行 → 审查 一站式入口
 ├── router/router.py              task_type → Agent 调度（llm_route_fn 兜底）
 ├── communication/                message.py 点对点消息；event.py EventBus 发布订阅
-├── memory/                       store.py 决策/失败日志；tiers.py 三层记忆
+├── memory/                       store.py 决策/失败日志（模板+运行时副本）；tiers.py 三层记忆
 │                                 （短期 / 项目长期 / 跨项目知识）
 │
 ├── tools/                        工具层（md 是能力描述，py 是实现）
@@ -218,7 +228,7 @@ print(result.finished, result.completed)
 用户输入：目标 = `做一个在线游戏网站`，技术栈 = `Node.js + Vue + MySQL`
 
 ```text
-CEO Agent 读取任务、澄清歧义、建立计划
+Supervisor（create_execution_plan）读取任务、拆解并建立执行计划
     ↓
 Product Manager 生成 PRD
     ↓
@@ -236,7 +246,7 @@ Security Auditor 审计（security_report.md）
     ↓
 Code Reviewer 全量代码检查
     ↓
-DevOps + CEO 验收交付（deployment.md）
+DevOps 部署 + AuditAgent 终审交付（final_report.md）
 ```
 
 最终输出：

@@ -1,6 +1,6 @@
 # Development Workflow
 
-覆盖 Task Lifecycle 的 Phase 4（Development）与 Phase 7（Optimization）。
+覆盖 Task Lifecycle 的 implementation 阶段（frontend / backend / database 子域）。
 
 ## 开发顺序
 
@@ -44,7 +44,7 @@ DevOps Engineer：本地运行脚本 / 构建配置
 - Git 提交遵循 `tools/git.md` 规范，一次提交一个完整意图。
 - 卡住两次以上：换思路并记录 `failure_memory.md`，不无脑重试。
 
-## Phase 7 — Optimization
+## 性能优化（Implementation 的一部分）
 
 安全审计通过后、交付前的优化阶段：
 

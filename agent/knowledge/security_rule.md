@@ -1,6 +1,6 @@
 # Security Rules
 
-开发期人人遵守的安全规则（防御性）。Security Auditor 在 Phase 6 按此清单复查。
+开发期人人遵守的安全规则（防御性）。Security Auditor 在 security 阶段按此清单复查。
 
 ## 输入与注入
 

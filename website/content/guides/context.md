@@ -1,6 +1,6 @@
 ---
 title: Managing context
-description: Keep long sessions working with automatic and manual compaction, and control model effort with thinking modes.
+description: Keep long sessions working with manual compaction and overflow compaction, and control model effort with thinking modes.
 ---
 
 A model can only read so much text at once — its **context window**. Long coding
@@ -32,31 +32,16 @@ same context therefore increases cumulative input usage, while active context
 consumption describes only what Tau expects to send next. The two figures are
 not expected to match.
 
-## Automatic compaction
+## Compaction on context overflow
 
-By default, Tau compacts automatically when the estimate gets close to the
-model's context window. It checks three moments:
+Tau compacts on demand with `/compact`, and automatically once when the provider
+reports a context-overflow error: it asks the model to summarize older messages,
+keeps a recent suffix of the conversation, and retries the failed request. The
+original session file is never edited — only the *active context* sent to the
+provider changes.
 
-- before a new prompt (to catch context added out-of-band),
-- after a successful turn (to compact before your next turn), and
-- after a context-overflow error (compact and retry once).
-
-When it compacts, Tau asks the model to summarize older messages, keeps a recent
-suffix of the conversation, and continues. The original session file is never
-edited — only the *active context* sent to the provider changes.
-
-The default threshold follows the model's context window minus a reserve. Providers
-that advertise an explicit runtime threshold can override that default. In particular,
-Codex subscription sessions discover account/rollout-specific limits from Codex's
-authenticated model catalog because those limits can differ from the public OpenAI API.
-You can override the resulting threshold for a run:
-
-```bash
-tau --auto-compact-threshold 100000
-```
-
-Automatic compaction is best-effort: if summarization fails, Tau logs it, keeps
-the original context, and carries on.
+Overflow compaction is best-effort: if summarization fails, Tau logs it, keeps
+the original context, and reports the error so you can compact manually.
 
 ## Manual compaction
 

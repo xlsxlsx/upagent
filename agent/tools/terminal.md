@@ -14,6 +14,7 @@
 - 长时间运行的进程（dev server、watch）放后台，不阻塞流程。
 - 需要交互确认的命令一律加非交互参数（`--yes`、`-y`）。
 - 命令失败时如实报告完整输出，分析根因后再重试，禁止盲目重复。
+- Windows 环境自动翻译常见 Unix 命令为 cmd 等价物（pwd→cd、ls→dir、cat→	ype、python3→python 等；删除类命令翻译后仍会被黑名单拦截）。
 - 优先使用项目环境运行（如本仓库用 `uv run pytest`、`uv run python ...`）。
 
 ## 限制（对齐 safety_policy.md）

@@ -30,7 +30,7 @@
 
 - 每个子任务有明确的**完成标准**（Definition of Done）
 - 明确子任务之间的**依赖顺序**（如：数据库 Schema 先于后端实现）
-- 拆解结果写入项目计划，由 CEO Agent 统一调度
+- 拆解结果写入执行计划（execution_plan.md），由 Supervisor 统一调度
 
 ## Step 3 — 风险分析
 

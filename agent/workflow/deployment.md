@@ -1,14 +1,14 @@
 # Deployment Workflow
 
-覆盖 Task Lifecycle 的 Phase 8（Delivery），由 CEO Agent 与 DevOps Engineer 主导。
+覆盖 Task Lifecycle 的 deploy 阶段，由 Supervisor 与 DevOps Engineer 主导。
 
 ## 前置条件
 
 进入本阶段前必须满足：
 
-- Phase 5 测试结论「通过」
-- Phase 6 安全审计结论「通过」
-- Phase 7 优化项处理完毕或经确认遗留
+- testing 阶段测试结论「通过」
+- security 阶段安全审计结论「通过」
+- 性能优化项处理完毕或经确认遗留
 
 ## 流程
 
@@ -17,7 +17,7 @@ DevOps：编写 deployment.md（环境 / 配置 / 启动 / 构建 / 回滚）
     ↓
 实测部署文档（干净环境从零跑通一遍）
     ↓
-CEO Agent：汇总全部交付物
+Supervisor：汇总全部交付物
     ↓
 执行 evaluation/final_acceptance.md 验收清单
     ↓

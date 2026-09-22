@@ -17,6 +17,6 @@
 ## 限制（对齐 safety_policy.md）
 
 - 禁止 `DROP TABLE` / `TRUNCATE` / 无 WHERE 的 `DELETE`、`UPDATE`，除非用户明确确认。
-- 破坏性迁移（删列、改类型）需 CEO Agent 确认并备份先行。
+- 破坏性迁移（删列、改类型）需 Supervisor/用户确认并备份先行。
 - 数据库连接凭证走环境变量，禁止写入代码或文档。
 - 生产数据库操作必须先获用户确认。

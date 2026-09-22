@@ -1,7 +1,8 @@
 # Project Memory
 
-记录当前项目状态。CEO Agent 负责维护：每完成一个子任务、每次阶段流转、每次回退都必须更新本文件。
-这是长任务的「单一事实来源」——上下文丢失后从这里恢复。
+记录当前项目状态。由 Supervisor 与各角色 Agent 维护：每完成一个子任务、
+每次阶段流转、每次回退都必须更新本文件。这是长任务的「单一事实来源」——
+上下文丢失后从这里恢复。
 
 ## 使用规则
 
@@ -16,7 +17,7 @@
 ```text
 Project:            <项目名称与一句话描述>
 
-Current Phase:      <Phase N — 名称（见 workflow/task_lifecycle.md）>
+Current Phase:      <任务类型，见 workflow/task_lifecycle.md：requirement / architecture / implementation / testing / security / deploy>
 
 Active Role:        <当前主导角色>
 
@@ -27,14 +28,12 @@ Last Updated:       <日期时间>
 
 <!-- 已完成的阶段与子任务，附交付物路径 -->
 
-- [ ] Phase 1 Requirement — PRD：
-- [ ] Phase 2 Planning — Roadmap：
-- [ ] Phase 3 Architecture — architecture.md：
-- [ ] Phase 4 Development —
-- [ ] Phase 5 Testing — test_report.md：
-- [ ] Phase 6 Security Audit — security_report.md：
-- [ ] Phase 7 Optimization —
-- [ ] Phase 8 Delivery — deployment.md：
+- [ ] Requirement — PRD：
+- [ ] Architecture — architecture.md：
+- [ ] Implementation — 源代码 + api.md + database_design.md：
+- [ ] Testing — test_report.md：
+- [ ] Security Audit — security_report.md：
+- [ ] Deploy — deployment.md：
 
 ## Current Issues
 

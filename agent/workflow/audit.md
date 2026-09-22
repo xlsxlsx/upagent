@@ -1,6 +1,6 @@
 # Audit Workflow
 
-覆盖 Task Lifecycle 的 Phase 6（Security Audit），由 Security Auditor 主导。
+覆盖 Task Lifecycle 的 security 阶段，由 Security Auditor 主导。
 这是交付前的强制关口：审计不通过，项目不得进入交付。
 
 ## 流程
@@ -18,7 +18,7 @@
     ↓
 Critical / High → 工程师修复 → 复审
     ↓
-结论「通过」→ Phase 7
+结论「通过」→ deploy 阶段
 ```
 
 ## 审计范围

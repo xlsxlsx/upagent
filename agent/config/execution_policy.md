@@ -7,7 +7,7 @@
 1. 单任务单目标：一次循环只解决任务树上的一个叶子节点。
 2. 先看再动：编码前必须读取 Repository Map 与相关文件，禁止盲改。
 3. 小步提交：每个可验证的改动点独立完成并验证，再进入下一个。
-4. 预算上限：单任务循环 ≤ 25 步（AgentLoop.max_steps）；单任务重试 ≤ 2 次（Supervisor.max_retries）。
+4. 预算上限：单任务循环 ≤ 10 步（AgentLoop.max_steps）；单任务重试 ≤ 2 次（Supervisor.max_retries，与 token 预算联动收紧）。
 
 ## 完成判定
 

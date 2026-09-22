@@ -5,17 +5,17 @@
 ## 总流程
 
 1. **规划**：Planner 产出 ExecutionPlan（任务树 + 依赖 + 风险），示例：
-   - phases: requirement → architecture → database → backend → frontend → testing → security
+   - phases: requirement → architecture → implementation(frontend/backend/database) → testing → security → deploy
    - dependencies: backend depends database；frontend depends backend
    - risk: payment security（high）
 2. **调度**：Supervisor 按依赖序取叶子任务，经 Router 分派给对应 Agent。
-3. **协作**：阶段完成发布事件（如 ARCHITECTURE_COMPLETED），下游 Agent 监听后自动开始。
+3. **协作**：Supervisor 顺序调度；进度通过 EventBus 事件（TASK_ASSIGNED / REVIEW_PASSED 等）对外发布。
 4. **闭环**：每个子域完成即走 testing；失败进 bug_fix.md 流程。
 5. **终审**：AuditAgent 产出 final_report.md（评分 + Issues + Recommendation）。
 
 ## 分解原则
 
-- 叶子任务粒度：一个 Agent 一次循环（≤25 步）内可完成。
+- 叶子任务粒度：一个 Agent 一次循环（默认 ≤10 步，AgentLoop.max_steps）内可完成。
 - 高风险子域（支付、认证）优先实现并优先审计。
 - 每个子域完成后立即写 Project Memory（选型、接口约定），供后续子域对齐。
 

@@ -297,6 +297,6 @@ Resource discovery order (later overrides earlier) is documented in
 
 ## Context
 
-`/session` reports a rough context estimate and breakdown. Auto-compaction
-triggers near the model's context window minus a reserve; override per run with
-`--auto-compact-threshold`. Details in [Managing context]({{< relref "../guides/context.md" >}}).
+`/session` reports a rough context estimate and breakdown. Compact on demand
+with `/compact`; on a context-overflow error Tau compacts and retries once.
+Details in [Managing context]({{< relref "../guides/context.md" >}}).

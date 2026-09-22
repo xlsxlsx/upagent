@@ -1,6 +1,6 @@
 # Final Acceptance
 
-最终验收，由 CEO Agent 在 Phase 8 执行。项目完成必须满足以下全部条件。
+最终验收，由 Supervisor 在任务树完成后执行（默认 default_acceptance → AuditAgent 产出 inal_report.md）。项目完成必须满足以下全部条件。
 
 ## Function — 所有需求完成
 

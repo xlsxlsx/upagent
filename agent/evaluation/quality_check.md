@@ -1,7 +1,7 @@
 # Quality Check
 
 Code Reviewer 与各工程师共用的代码质量检查清单。
-用于：Phase 4 每个子任务的评审、Phase 8 验收前的整体复查。
+用于：implementation 每个子任务的评审、deploy 前验收的整体复查。
 
 ## 检查清单
 

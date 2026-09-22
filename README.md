@@ -176,7 +176,7 @@ no code changes required.
   and more.
 - Project instructions from `AGENTS.md`, `.tau/`, and `.agents/` resources.
 - User skills, prompt templates, and custom TUI themes.
-- Context accounting, manual compaction, and optional automatic compaction.
+- Context accounting, manual compaction, and compaction on context overflow.
 - Provider-neutral event rendering for Rich, plain text, JSON, transcripts, and
   custom frontends.
 
