@@ -21,6 +21,12 @@ from agent.core.agent import AGENT_ROOT
 # 注入上下文时各取最近 N 条，控制体积
 _RECENT_LIMIT = 5
 
+# 运行时文件缺省时从模板复制初始内容（模板由 git 跟踪，运行时副本已 ignore）
+_TEMPLATE_FILES = {
+    "decision_log.md": "decision_log.template.md",
+    "failure_memory.md": "failure_memory.template.md",
+}
+
 
 @dataclass
 class MemoryStore:
@@ -87,6 +93,11 @@ class MemoryStore:
     def _append(self, name: str, text: str) -> None:
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.is_file():
+            template_name = _TEMPLATE_FILES.get(name)
+            template = self.root / template_name if template_name else None
+            if template is not None and template.is_file():
+                path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
         with path.open("a", encoding="utf-8") as fh:
             fh.write(text)
 

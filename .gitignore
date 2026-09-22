@@ -3,6 +3,9 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+*.spec
+# The desktop executable build recipe is part of the deliverable
+!UpAgent.spec
 wheels/
 *.egg-info
 .mypy_cache/
@@ -29,8 +32,13 @@ website/.hugo_build.lock
 agent/**/secrets*
 
 # Test artifacts
-.pytest-tmp/
+.pytest-tmp*/
 .llm-demo-out/
 .ruff_cache/
 # Runtime memory artifact
 agent/memory/history.jsonl
+
+# Runtime memory artifacts (appended during agent runs)
+agent/memory/decision_log.md
+agent/memory/failure_memory.md
+agent/memory/project_facts.md
