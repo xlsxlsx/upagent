@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UpAgent</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header id="topbar">
+    <span class="logo">Up<span>Agent</span></span>
+    <div class="workspace-box">
+      <input id="workspace" spellcheck="false" placeholder="工作目录路径，如 D:\my\project">
+      <button id="ws-set" class="btn">设置</button>
+    </div>
+    <span id="status-chip" class="chip">连接中…</span>
+  </header>
+
+  <main id="layout">
+    <aside id="files-panel" class="panel">
+      <div class="panel-head">
+        <span class="panel-title">文件</span>
+        <button id="refresh-tree" class="btn ghost" title="刷新文件树">刷新</button>
+      </div>
+      <div id="tree" class="tree"></div>
+    </aside>
+
+    <section id="editor-panel" class="panel">
+      <div class="panel-head editor-head">
+        <span id="file-path" class="file-path">未打开文件</span>
+        <button id="save" class="btn" disabled>保存 Ctrl+S</button>
+      </div>
+      <div id="editor-body">
+        <div id="line-numbers" aria-hidden="true">1</div>
+        <textarea id="code" spellcheck="false"
+                  placeholder="从左侧文件树选择一个文件开始编辑"></textarea>
+      </div>
+    </section>
+
+    <aside id="chat-panel" class="panel">
+      <div class="panel-head">
+        <span class="panel-title">任务对话</span>
+        <span id="run-state" class="run-state idle"></span>
+      </div>
+      <div id="messages"></div>
+      <div id="composer">
+        <input id="tech-stack" spellcheck="false" placeholder="技术栈（可选）：Python + pytest">
+        <textarea id="goal" rows="3" spellcheck="false"
+                  placeholder="描述最终目标，例如：实现三种排序算法并编写测试"></textarea>
+        <div class="composer-actions">
+          <span class="hint">Enter 发送，Shift+Enter 换行</span>
+          <button id="send" class="btn primary">发送</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
